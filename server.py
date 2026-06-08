@@ -198,24 +198,22 @@ def _comp_dict(c: Component) -> dict:
     }
 
 
-def _warn_dict(w) -> dict:
-    return {
-        "id": w.id,
-        "warning_type": w.warning_type,
-        "message": w.message,
-        "affected": w.affected,
-        "ignored": w.ignored,
-        "ignore_reason": w.ignore_reason,
-    }
+# One-line meaning + ignore guidance per warning type. Returned once per type that
+# is present, instead of repeating the full prose message on every warning.
+WARNING_LEGEND = {
+    "hanging_output": "An output type has no downstream consumer. OK if it is a terminal/log/side-effect, or wire it to a storage component.",
+    "starved_input": "An input type has no upstream producer. OK if it enters at the graph boundary.",
+    "undefined_types": "A non-external component has empty input or output types. OK if deliberately abstract at this stage.",
+    "orphaned_component": "A component has no edges at all. OK if newly added and not yet wired in.",
+    "coverage_gap": "A parent's declared types are not covered by its entry/exit children. OK mid-authoring; resolve before treating the level as done.",
+    "flow_cycle": "A cycle exists in the FLOW graph. OK if it is an intentional feedback/retry loop.",
+}
 
 
-def _active_summary() -> list[dict]:
-    """Active (non-ignored) warnings as compact {id, type, affected} dicts, for
-    the VERIFY step after a write."""
-    return [
-        {"id": w.id, "warning_type": w.warning_type, "affected": w.affected}
-        for w in _active_warnings(GRAPH.warnings)
-    ]
+def _active_count() -> int:
+    """Number of active (non-ignored) warnings. Returned as a cheap signal after a
+    write so the caller can decide whether to spend a get_active_warnings call."""
+    return len(_active_warnings(GRAPH.warnings))
 
 
 # ===========================================================================
@@ -452,21 +450,30 @@ def get_impact(component_id: str) -> dict:
 
 @mcp.tool()
 def get_active_warnings() -> dict:
-    """All current non-ignored warnings, recomputed live against the graph. Each
-    warning explains why it fired AND when it is safe to ignore. Warning types:
-      hanging_output   -- an output type no downstream component consumes.
-      starved_input    -- an input type no upstream component produces.
-      undefined_types  -- a non-external component with empty input or output types.
-      orphaned_component -- a component with no edges at all.
-      coverage_gap     -- a parent's types not covered by its entry/exit children.
-      flow_cycle       -- a cycle in the FLOW graph (may be a legit feedback loop).
-    Use ignore_warning to dismiss any you have judged intentional.
+    """All current non-ignored warnings, recomputed live against the graph.
 
-    Returns {"warnings": [...]}."""
+    Each warning is compact: {id, warning_type, affected}. The meaning and
+    ignore-guidance for every type present is returned once in `legend` (keyed by
+    type), instead of repeating a prose message on every warning. `affected` lists
+    the component ids or type names involved. Use ignore_warning(id, reason) to
+    dismiss any you have judged intentional.
+
+    Returns {"warnings": [{id, warning_type, affected}], "legend": {type: meaning}}."""
     if GRAPH is None:
         return _no_active()
     _persist()
-    return {"warnings": [_warn_dict(w) for w in _active_warnings(GRAPH.warnings)]}
+    active = _active_warnings(GRAPH.warnings)
+    return {
+        "warnings": [
+            {"id": w.id, "warning_type": w.warning_type, "affected": w.affected}
+            for w in active
+        ],
+        "legend": {
+            w.warning_type: WARNING_LEGEND[w.warning_type]
+            for w in active
+            if w.warning_type in WARNING_LEGEND
+        },
+    }
 
 
 @mcp.tool()
@@ -537,7 +544,8 @@ def propose_component(
 
     Structural problems (duplicate id, missing/ invalid parent, wrong z_level)
     block the write and come back as {"ok": False, "errors": [...]}. On success
-    returns {"ok": True, "active_warnings": [...]} -- review those to VERIFY."""
+    returns {"ok": True, "active_warnings": <count>}; call get_active_warnings only
+    if that count is nonzero and you want to VERIFY details."""
     if GRAPH is None:
         return _no_active()
     locs = [
@@ -563,7 +571,7 @@ def propose_component(
     if errors:
         return {"ok": False, "errors": errors}
     _persist()
-    return {"ok": True, "component_id": component_id, "active_warnings": _active_summary()}
+    return {"ok": True, "component_id": component_id, "active_warnings": _active_count()}
 
 
 @mcp.tool()
@@ -579,7 +587,7 @@ def update_component(component_id: str, fields: dict) -> dict:
     "end_line"?} dicts.
 
     Each successful update bumps the component's version (optimistic-concurrency
-    primitive). Returns {"ok": True, "active_warnings": [...]} or
+    primitive). Returns {"ok": True, "active_warnings": <count>} or
     {"ok": False, "errors": [...]}."""
     if GRAPH is None:
         return _no_active()
@@ -600,7 +608,7 @@ def update_component(component_id: str, fields: dict) -> dict:
     if errors:
         return {"ok": False, "errors": errors}
     _persist()
-    return {"ok": True, "component_id": component_id, "active_warnings": _active_summary()}
+    return {"ok": True, "component_id": component_id, "active_warnings": _active_count()}
 
 
 @mcp.tool()
@@ -624,7 +632,7 @@ def delete_component(component_id: str) -> dict:
         }
     _delete_component(GRAPH, component_id)
     _persist()
-    return {"ok": True, "deleted": component_id, "active_warnings": _active_summary()}
+    return {"ok": True, "deleted": component_id, "active_warnings": _active_count()}
 
 
 @mcp.tool()
@@ -641,7 +649,7 @@ def propose_edge(edge_type: str, from_id: str, to_id: str) -> dict:
       when you propose a component with a parent_id. A manual SCOPE edge must point
       from a parent to its direct child exactly one level down.
 
-    Returns {"ok": True, "active_warnings": [...]} or {"ok": False, "errors": [...]}."""
+    Returns {"ok": True, "active_warnings": <count>} or {"ok": False, "errors": [...]}."""
     if GRAPH is None:
         return _no_active()
     et, err = _parse_edge_type(edge_type)
@@ -651,7 +659,7 @@ def propose_edge(edge_type: str, from_id: str, to_id: str) -> dict:
     if errors:
         return {"ok": False, "errors": errors}
     _persist()
-    return {"ok": True, "edge": f"{from_id} -> {to_id} ({et.value})", "active_warnings": _active_summary()}
+    return {"ok": True, "edge": f"{from_id} -> {to_id} ({et.value})", "active_warnings": _active_count()}
 
 
 @mcp.tool()

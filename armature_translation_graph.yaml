@@ -1,0 +1,296 @@
+components:
+  ext_filesystem:
+    component_id: ext_filesystem
+    description: "OS filesystem \u2014 reads source files from the target codebase\
+      \ directory"
+    processing: Provides raw file bytes and directory tree structure via standard
+      OS I/O. Atomic boundary; no decomposition.
+    input_types:
+    - SourcePath
+    output_types:
+    - RawFiles
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    locations: []
+  ext_python_ast:
+    component_id: ext_python_ast
+    description: "Python stdlib ast module \u2014 parses .py files into AST node trees"
+    processing: Takes Python source strings, returns typed AST node trees (Module,
+      FunctionDef, ClassDef, Import, etc.). Atomic; used as a parsing oracle by static_analysis.
+    input_types:
+    - PythonSource
+    output_types:
+    - ASTNodes
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    locations:
+    - path: models.py
+      start_line: null
+      end_line: null
+  ext_tree_sitter:
+    component_id: ext_tree_sitter
+    description: "tree-sitter library \u2014 multi-language parser for non-Python\
+      \ source files"
+    processing: Incremental, error-tolerant parser covering JS/TS, Rust, Go, etc.
+      Returns concrete syntax trees. Used by static_analysis for polyglot codebases.
+    input_types:
+    - SourceFile
+    output_types:
+    - CSTNodes
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    locations: []
+  ext_armature_models:
+    component_id: ext_armature_models
+    description: "models.py \u2014 Component, Edge, Graph, FileLocation, EdgeType\
+      \ dataclasses"
+    processing: Pure data-model library. Provides the authoritative dataclass constructors
+      that graph_synthesis instantiates when building the graph draft. No I/O, no
+      validation.
+    input_types:
+    - ConstructorArgs
+    output_types:
+    - ArmatureObjects
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    locations:
+    - path: models.py
+      start_line: null
+      end_line: null
+  ext_armature_validator:
+    component_id: ext_armature_validator
+    description: "validator.py \u2014 validation functions for components and edges"
+    processing: Checks z_level consistency, sibling constraints on FLOW edges, SCOPE
+      depth rules, and port coverage. Returns error strings. Called by ext_armature_writer
+      before any store write.
+    input_types:
+    - ComponentOrEdge
+    output_types:
+    - ValidationErrors
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    locations:
+    - path: validator.py
+      start_line: null
+      end_line: null
+  ext_armature_store:
+    component_id: ext_armature_store
+    description: "store.py \u2014 raw graph CRUD; add/remove components and edges,\
+      \ sync derived fields"
+    processing: Mechanical in-memory operations with no validation. Maintains edges_in/edges_out/children
+      lists as derived state. Called by ext_armature_writer after validation passes.
+    input_types:
+    - ValidatedMutation
+    output_types:
+    - MutatedGraphState
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    locations:
+    - path: store.py
+      start_line: null
+      end_line: null
+  ext_armature_writer:
+    component_id: ext_armature_writer
+    description: "writer.py \u2014 validated write gateway: propose_component, propose_edge,\
+      \ update_component, delete_component"
+    processing: "Gates every mutation through ext_armature_validator, then delegates\
+      \ to ext_armature_store. The single entry point for all graph writes in the\
+      \ translation layer \u2014 never call store directly."
+    input_types:
+    - GraphDraft
+    output_types:
+    - ValidatedMutation
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    locations:
+    - path: writer.py
+      start_line: null
+      end_line: null
+  ext_armature_warnings:
+    component_id: ext_armature_warnings
+    description: "graph_warnings.py \u2014 warning system; run_all_warnings, get_active_warnings,\
+      \ ignore_warning"
+    processing: Recomputes all warnings (hanging_output, undefined_types, orphaned_component,
+      coverage_gap, flow_cycle) from the current graph state after every mutation.
+      Only ignored decisions persist; live warnings are always derived.
+    input_types:
+    - MutatedGraphState
+    output_types:
+    - AnnotatedGraphState
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    locations:
+    - path: graph_warnings.py
+      start_line: null
+      end_line: null
+  ext_armature_serializer:
+    component_id: ext_armature_serializer
+    description: "serializer.py \u2014 YAML load/save; only authoritative state written,\
+      \ derived fields rebuilt on load"
+    processing: save_graph writes components + FLOW/REFERENCE edges + ignored warning
+      decisions to YAML. load_graph reconstructs derived state (edges_in/out, children,
+      SCOPE edges, active warnings) from scratch. Final sink of the write pipeline.
+    input_types:
+    - AnnotatedGraphState
+    output_types:
+    - PersistedGraph
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    locations:
+    - path: serializer.py
+      start_line: null
+      end_line: null
+  source_ingestion:
+    component_id: source_ingestion
+    description: Walks the target codebase root, discovers all source files, and reads
+      their raw content into a structured manifest
+    processing: 'Receives a root SourcePath. Uses ext_filesystem to walk directories,
+      filters by language extension, reads each file''s bytes. Produces a FileManifest:
+      list of {path, language, raw_content} records. Respects .gitignore patterns.'
+    input_types:
+    - RawFiles
+    output_types:
+    - FileManifest
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    locations: []
+  static_analysis:
+    component_id: static_analysis
+    description: "Pass 1 downward: parses each file to extract structural skeleton\
+      \ \u2014 functions, classes, imports, call sites, and file locations"
+    processing: 'Dispatches .py files to ext_python_ast and all other languages to
+      ext_tree_sitter. Extracts: module/class/function names, parameter lists, return
+      annotations, import graph, call graph, and FileLocation records. Detects likely
+      external boundaries (stdlib imports, third-party packages, UI entry points).
+      Produces a StructureMap: flat list of raw nodes with source spans and dependency
+      edges, no types or descriptions yet.'
+    input_types:
+    - FileManifest
+    output_types:
+    - StructureMap
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    locations: []
+  llm_annotation:
+    component_id: llm_annotation
+    description: 'Pass 2 upward: uses LLM to infer Armature input/output type strings
+      and write processing descriptions for every node in the StructureMap'
+    processing: "The LLM executing this pipeline IS the annotator \u2014 no external\
+      \ call needed. Reads StructureMap nodes bottom-up (leaves first). For each node,\
+      \ reasons over its source snippet, parameter names, return annotations, and\
+      \ call-graph neighbors to produce: suggested input_types, output_types, and\
+      \ a one-sentence processing description. Emits results as tool calls (propose_component\
+      \ / update_component) or batches them into an AnnotatedStructure for graph_synthesis.\
+      \ Leaf nodes with no internal callers get external=true suggestions."
+    input_types:
+    - StructureMap
+    output_types:
+    - AnnotatedStructure
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 1
+    locations: []
+  graph_synthesis:
+    component_id: graph_synthesis
+    description: Constructs Armature Component and Edge objects from the annotated
+      structure, assigning z_levels and resolving the parent hierarchy
+    processing: 'Reads AnnotatedStructure. Maps each node to a Component via ext_armature_models
+      constructors: assigns component_id (module-qualified name), description, processing,
+      input_types, output_types, z_level (depth in call graph), external flag, and
+      FileLocation list. Derives FLOW edges from the call graph; marks cross-boundary
+      dependencies as REFERENCE edges. Packages everything as a GraphDraft: a validated-schema
+      bundle of Components + Edges ready for writing, with no I/O to the store yet.'
+    input_types:
+    - AnnotatedStructure
+    output_types:
+    - GraphDraft
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    locations: []
+  graph_commit:
+    component_id: graph_commit
+    description: Iterates the GraphDraft and writes every component and edge into
+      the live Armature graph via the validated write stack, then triggers warning
+      recompute and serialization
+    processing: 'Receives GraphDraft. Calls ext_armature_writer.propose_component
+      for each component in topological order (parents before children), then propose_edge
+      for each FLOW and REFERENCE edge. Collects any validation errors and surfaces
+      them as a migration report rather than aborting. After all writes, triggers
+      ext_armature_warnings.run_all_warnings and ext_armature_serializer.save_graph
+      (the _persist pattern). Returns PersistedGraph: the final YAML path plus a summary
+      of written/skipped/errored items.'
+    input_types:
+    - GraphDraft
+    output_types:
+    - GraphDraft
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 2
+    locations: []
+edges:
+- edge_type: FLOW
+  from_id: ext_filesystem
+  to_id: source_ingestion
+- edge_type: FLOW
+  from_id: source_ingestion
+  to_id: static_analysis
+- edge_type: FLOW
+  from_id: static_analysis
+  to_id: llm_annotation
+- edge_type: FLOW
+  from_id: llm_annotation
+  to_id: graph_synthesis
+- edge_type: FLOW
+  from_id: graph_synthesis
+  to_id: graph_commit
+- edge_type: FLOW
+  from_id: graph_commit
+  to_id: ext_armature_writer
+- edge_type: FLOW
+  from_id: ext_armature_writer
+  to_id: ext_armature_store
+- edge_type: FLOW
+  from_id: ext_armature_store
+  to_id: ext_armature_warnings
+- edge_type: FLOW
+  from_id: ext_armature_warnings
+  to_id: ext_armature_serializer
+- edge_type: REFERENCE
+  from_id: static_analysis
+  to_id: ext_python_ast
+- edge_type: REFERENCE
+  from_id: static_analysis
+  to_id: ext_tree_sitter
+- edge_type: REFERENCE
+  from_id: graph_synthesis
+  to_id: ext_armature_models
+- edge_type: REFERENCE
+  from_id: ext_armature_writer
+  to_id: ext_armature_validator
+warnings: []
