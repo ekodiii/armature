@@ -136,24 +136,28 @@ surface as slash commands.)
 
 ## Three modes
 
-Same tools, different framing. Each is also exposed as an MCP **prompt**
-(`armature_author`, `armature_edit`, `armature_implement`) that loads the right
-discipline as a slash command.
+Same tools, different framing. Each is exposed as an MCP **prompt**
+(`armature_plan`, `armature_implement`) that loads the right discipline as a slash
+command.
 
-**Authoring** (new system): `new_graph(name)`, then define **all** `z=0` components
-and their `FLOW` edges before decomposing anything. Work top-down, one level at a
-time. A context wipe between levels is expected — re-fetch the component you're
-decomposing to re-orient.
+**Planning** (`/armature_plan`): all graph work — new systems, changes to existing
+ones, decomposing a component deeper. The prompt reads the request and takes the
+right path automatically:
+- *New system*: `new_graph(name)`, define all `z=0` components and `FLOW` edges
+  before decomposing anything, work top-down one level at a time.
+- *Change to existing*: `search_components` to find what the request refers to,
+  `get_impact` before touching anything, change only what is in scope.
+- *Decomposing a component*: `get_work_context(id)` locks you to that component's
+  contract — the rest of the graph is invisible until you're done.
 
-**Editing** (existing system): `open_graph(name)`, fetch the relevant subgraph
-first, make only changes within the scope of the task, verify edges after each write.
-Editing a component's spec bumps its `version` and flips its status to **stale** —
-its code now needs re-implementation.
-
-**Implementing** (graph → code): `get_pending_implementation()` lists what's
-`planned` (never built) or `stale` (spec changed since). For each, pull
-`get_work_context(id)`, write the code to honor that contract with your own editor
-tools, then `mark_implemented(id)`.
+**Implementing** (`/armature_implement`): realizing what the graph specifies — code,
+hardware, configuration, process, whatever the domain requires. Human-directed: the
+LLM responds to what the human asks or reports, it does not autonomously drain the
+queue. For each request it finds the right component, establishes scope with
+`get_impact`, verifies the artifact against the contract, and calls
+`mark_implemented(id)`. If reality doesn't match the spec it stops, surfaces the
+discrepancy, and asks whether the artifact or the graph needs to change — mismatches
+are never silently reconciled.
 
 **Execution protocol (all modes):** ORIENT → PLAN → WRITE → VERIFY → REPEAT. The
 key rule: call **`get_work_context(id)` immediately before every write or

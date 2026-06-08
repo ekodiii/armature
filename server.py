@@ -39,7 +39,7 @@ Graph model (read this before using any tool):
   WARNING you can read and, if intentional, ignore. Ignored warnings stay ignored
   across sessions.
 
-Execution protocol (both authoring and editing):
+Execution protocol (all modes):
   1. ORIENT  -- fetch the relevant component / subgraph before touching anything.
   2. PLAN    -- reason about what changes.
   3. WRITE   -- propose one component at a time.
@@ -835,56 +835,58 @@ _WRITE_DISCIPLINE = (
 
 
 @mcp.prompt()
-def armature_author() -> str:
-    """Authoring mode: model a brand-new system from scratch as a graph."""
+def armature_plan() -> str:
+    """Planning mode: model a new system or change an existing one as a graph."""
     return (
-        "You are AUTHORING a new system in Armature.\n\n"
-        "1. list_graphs() to see what exists; new_graph(name) to begin. If it already "
-        "exists you are editing, not authoring -- use the edit flow instead.\n"
-        "2. Define ALL z=0 components and their FLOW edges first. Do not decompose until "
-        "the top level is complete and you understand its warnings.\n"
-        "3. Decompose top-down, one level at a time. A context wipe between levels is "
-        "expected: re-fetch the component you are decomposing to re-orient.\n"
-        "4. Entry children must cover the parent's input types and exit children its "
-        "output types. Use REFERENCE edges only for weak cross-boundary links.\n\n"
-        + _WRITE_DISCIPLINE
-    )
-
-
-@mcp.prompt()
-def armature_edit() -> str:
-    """Editing mode: make scoped changes to an existing system's graph."""
-    return (
-        "You are EDITING an existing system in Armature.\n\n"
-        "1. list_graphs(), then open_graph(name) for the system you are changing.\n"
-        "2. get_subgraph and get_impact before touching anything -- understand the "
-        "blast radius first.\n"
-        "3. Make ONLY changes within the scope of the task. After each write, look at the "
-        "returned warning count and call get_active_warnings if it is nonzero.\n"
-        "4. Editing a component's spec bumps its version and flips it to 'stale': its "
-        "code now needs re-implementation. That is expected -- surface it, do not hide it.\n\n"
+        "You are doing PLANNING WORK in Armature. The graph is the design artifact.\n\n"
+        "Orient first:\n"
+        "  list_graphs() to see what exists. open_graph(name) to resume one, or\n"
+        "  new_graph(name) to begin a new system. If unsure what is open, call get_graph_stats().\n\n"
+        "Read the request, then take the matching path:\n\n"
+        "  NEW SYSTEM -- no graph exists yet:\n"
+        "    Define ALL z=0 components and their FLOW edges before decomposing anything.\n"
+        "    Do not go deeper until z=0 is complete and warnings are understood.\n"
+        "    Work top-down, one level at a time.\n\n"
+        "  CHANGE TO EXISTING SYSTEM:\n"
+        "    search_components to find what the request refers to.\n"
+        "    get_impact before touching anything -- understand the blast radius first.\n"
+        "    Make ONLY changes within the scope of the task.\n"
+        "    Editing a spec bumps version and flips status to 'stale' -- surface it, do not hide it.\n\n"
+        "  DECOMPOSING A COMPONENT:\n"
+        "    get_work_context(id) for the component you are entering.\n"
+        "    Work only within its contract. Treat the rest of the graph as invisible.\n"
+        "    Entry children must cover parent input types. Exit children must cover output types.\n\n"
+        "After each write: check the returned warning count. Call get_active_warnings if nonzero.\n\n"
         + _WRITE_DISCIPLINE
     )
 
 
 @mcp.prompt()
 def armature_implement() -> str:
-    """Implementation mode: turn the graph's spec into working code."""
+    """Implementation mode: realize the graph's spec as code, hardware, config, or any artifact."""
     return (
-        "You are IMPLEMENTING the system's code to match its Armature graph. The graph "
-        "is the spec; make the code agree with it.\n\n"
-        "1. open_graph(name), then get_pending_implementation() to see what is 'planned' "
-        "(never built) or 'stale' (spec changed since it was built). Take stale "
-        "regressions and leaf components first.\n"
-        "2. For EACH component: call get_work_context(id) first. It gives the contract "
-        "(input/output types), what it receives upstream, what it must produce "
-        "downstream, the parent contract to satisfy, and the current code at its "
-        "locations.\n"
-        "3. Write or update the code with your own editor/file tools so it honors that "
-        "contract. If locations are missing or have moved, set them with "
-        "update_component.\n"
-        "4. Call mark_implemented(id) once the code matches the current spec version, "
-        "then move on. Re-run get_pending_implementation to track what is left.\n\n"
+        "You are IMPLEMENTING in Armature. The graph spec is the acceptance criterion.\n\n"
+        "This is human-directed. Respond to what the human tells you -- do not autonomously\n"
+        "work through the queue unless explicitly asked.\n\n"
+        "For each request:\n"
+        "1. search_components to find the component(s) that match. If the match is\n"
+        "   high-level, check its children -- work at the level where the task lives.\n"
+        "2. get_impact to establish the full scope: what is connected, what must agree.\n"
+        "3. For each component in scope: get_work_context(id) -- the contract is the\n"
+        "   acceptance criterion for this component.\n"
+        "4. Produce or verify the artifact:\n"
+        "   - If you can produce it (code, config, document, spec): produce it and verify\n"
+        "     it honors the contract.\n"
+        "   - If the human produced it (wired hardware, deployed config, enacted a process):\n"
+        "     verify their work against the contract with them.\n"
+        "5. Before calling mark_implemented(id), confirm ALL contracts in scope are\n"
+        "   satisfied: inputs covered, outputs produced, no broken edges.\n\n"
+        "If reality does not match the spec -- STOP. Surface the discrepancy. Ask:\n"
+        "  - Does the artifact need to change? -> continue implementing.\n"
+        "  - Does the graph need to change? -> switch to /armature_plan first, then return.\n"
+        "Never silently reconcile a mismatch. The graph and reality must agree.\n\n"
+        "get_pending_implementation() shows what is still planned or stale -- call it\n"
+        "when the human asks what is left to do.\n\n"
         + _WRITE_DISCIPLINE
     )
 

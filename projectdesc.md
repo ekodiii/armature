@@ -161,16 +161,18 @@ The LLM never gets the whole graph. It navigates via tool calls.
 - mark_implemented(id) -- record that the code matches the current spec version.
 - ignore_warning(warning_id, reason)
 
-**Three modes, same tools, different system prompts (each also an MCP prompt / slash command):**
+**Two modes, same tools, different system prompts (each also an MCP prompt / slash command):**
 
-AUTHORING MODE -- graph does not exist yet:
-"Call new_graph() first. Define all z=0 components and their edges before decomposing anything. Do not go deeper until the top level is complete and validated. Work top-down one level at a time. Context wipe between levels is expected -- fetch the component you are decomposing first to re-orient."
+PLANNING MODE (/armature_plan) -- all graph work:
+Reads the request and branches automatically:
+- New system: new_graph(), define all z=0 components and FLOW edges before decomposing. Work top-down one level at a time.
+- Change to existing: search_components to find the request target, get_impact before touching anything, change only what is in scope, surface stale flips.
+- Decomposing a component: get_work_context(id) locks you to that contract; treat the rest of the graph as invisible.
 
-EDITING MODE -- graph already exists:
-"open_graph(), fetch the relevant subgraph before touching anything. Make only changes within the scope of the current task. Orient, plan, write, verify. Editing a spec bumps version and flips status to stale."
-
-IMPLEMENTING MODE -- turn the graph into code:
-"open_graph(), get_pending_implementation() for planned/stale components. For each: get_work_context(id), write the code to honor the contract with your own editor tools, set locations, then mark_implemented(id)."
+IMPLEMENTATION MODE (/armature_implement) -- realizing the spec in any domain:
+Human-directed. The LLM responds to what the human asks or reports -- it does not autonomously drain the queue.
+For each request: search_components to find the right component and level, get_impact for full scope, get_work_context(id) per component, produce or verify the artifact, confirm all contracts satisfied, then mark_implemented(id).
+If reality does not match the spec: STOP. Ask whether the artifact or the graph needs to change. Never silently reconcile a mismatch. The two-way escape: fix the implementation OR switch to planning mode to fix the graph first.
 
 **LLM execution protocol (all modes):**
 1. ORIENT -- call get_work_context(id) for the exact node before touching it; re-pull per change, never write from session memory.
