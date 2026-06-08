@@ -1,9 +1,21 @@
 """Armature MCP server.
 
-Exposes the graph as a set of navigation and authoring tools so an LLM can plan
-and edit large systems without ever holding the whole codebase in context. The
-LLM fetches one zoom level at a time; the graph holds all memory between context
-wipes.
+Exposes a graph as a set of navigation and authoring tools so an LLM can plan and
+edit large engineering systems of any kind (software, mechanical, electrical,
+process, organizational) without holding the whole system in context. The LLM
+fetches one zoom level at a time; the graph holds all memory between context wipes.
+
+Workspace (how the server finds your work):
+- You may keep many named graphs, one per system you are modeling. They live in a
+  central library (`~/.armature/graphs/`) by default, so this works the same on a
+  terminal, a desktop app, or the web -- there is no dependency on a "current
+  directory". A registry maps each graph NAME to its file, so a graph file may also
+  live inside a code repo (pass a `path` to new_graph) and still be opened by name.
+- Exactly one graph is ACTIVE per session; every read/write tool operates on it.
+  The active graph is remembered across restarts.
+- Start by calling list_graphs() to see what exists, then open_graph(name) to
+  resume one or new_graph(name) to begin a new system. If you are unsure what is
+  open, call get_graph_stats().
 
 Graph model (read this before using any tool):
 - A component has one input port and one output port, each a list of string
@@ -35,7 +47,9 @@ Execution protocol (both authoring and editing):
   5. REPEAT.
 """
 
+import json
 import os
+import re
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -62,27 +76,88 @@ from writer import (
     update_component as _update_component,
 )
 
-# --- configuration ---------------------------------------------------------
-GRAPH_PATH = os.environ.get(
-    "ARMATURE_GRAPH_PATH", os.path.join(os.getcwd(), "armature_graph.yaml")
-)
-# Code roots for get_component_code. FileLocation.path is relative to this.
-PROJECT_ROOT = os.environ.get(
-    "ARMATURE_PROJECT_ROOT", os.path.dirname(os.path.abspath(GRAPH_PATH))
-)
+# --- workspace configuration -----------------------------------------------
+# Central library, location-independent so it works on CLI, desktop, and web.
+ARMATURE_HOME = os.environ.get("ARMATURE_HOME", os.path.expanduser("~/.armature"))
+GRAPHS_DIR = os.path.join(ARMATURE_HOME, "graphs")
+REGISTRY_PATH = os.path.join(ARMATURE_HOME, "registry.json")
+# Optional override for resolving relative FileLocation paths (get_component_code).
+# When unset, paths resolve against the directory holding the active graph file.
+PROJECT_ROOT_OVERRIDE = os.environ.get("ARMATURE_PROJECT_ROOT")
 
-GRAPH: Optional[Graph] = load_graph(GRAPH_PATH) if os.path.exists(GRAPH_PATH) else None
+os.makedirs(GRAPHS_DIR, exist_ok=True)
+
+# Active-session state.
+GRAPH: Optional[Graph] = None
+ACTIVE: Optional[str] = None
+
+_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _-]*")
 
 mcp = FastMCP("armature", instructions=__doc__)
 
 
+# --- registry / workspace helpers ------------------------------------------
+def _load_registry() -> dict:
+    if os.path.exists(REGISTRY_PATH):
+        with open(REGISTRY_PATH) as f:
+            return json.load(f)
+    return {"active": None, "graphs": {}}
+
+
+def _save_registry(reg: dict) -> None:
+    with open(REGISTRY_PATH, "w") as f:
+        json.dump(reg, f, indent=2)
+
+
+def _valid_name(name: str) -> bool:
+    return bool(name) and _NAME_RE.fullmatch(name) is not None
+
+
+def _active_path() -> Optional[str]:
+    return _load_registry()["graphs"].get(ACTIVE)
+
+
+def _project_root() -> str:
+    if PROJECT_ROOT_OVERRIDE:
+        return PROJECT_ROOT_OVERRIDE
+    path = _active_path()
+    return os.path.dirname(os.path.abspath(path)) if path else os.getcwd()
+
+
+def _set_active(name: str, graph: Graph) -> None:
+    global GRAPH, ACTIVE
+    GRAPH, ACTIVE = graph, name
+    reg = _load_registry()
+    reg["active"] = name
+    _save_registry(reg)
+
+
+def _no_active() -> dict:
+    names = list(_load_registry()["graphs"])
+    return {
+        "error": (
+            "No graph is open. Call open_graph(name) to resume one or new_graph(name) "
+            f"to start a new system. Existing graphs: {names or 'none yet'}."
+        )
+    }
+
+
+# Resume the last-active graph from a previous session, if still present.
+_boot = _load_registry()
+if _boot.get("active") and _boot["active"] in _boot["graphs"]:
+    _boot_path = _boot["graphs"][_boot["active"]]
+    if os.path.exists(_boot_path):
+        GRAPH = load_graph(_boot_path)
+        ACTIVE = _boot["active"]
+
+
 # --- internal helpers ------------------------------------------------------
 def _persist() -> None:
-    """Recompute warnings (preserving ignored state) and write the graph to disk.
-    Called after every successful mutation so the graph is the durable source of
-    truth between context wipes."""
+    """Recompute warnings (preserving ignored state) and write the active graph to
+    its registered file. Called after every successful mutation so the graph is the
+    durable source of truth between context wipes."""
     GRAPH.warnings = run_all_warnings(GRAPH)
-    save_graph(GRAPH, GRAPH_PATH)
+    save_graph(GRAPH, _active_path())
 
 
 def _fetch(component_id: str):
@@ -144,56 +219,102 @@ def _active_summary() -> list[dict]:
 
 
 # ===========================================================================
-# Graph tools
+# Workspace / graph tools
 # ===========================================================================
 @mcp.tool()
-def new_graph(overwrite: bool = False) -> dict:
-    """Create a fresh, empty graph and make it active. This is the entry point
-    for AUTHORING MODE (building a system from scratch).
+def list_graphs() -> dict:
+    """List every graph in the workspace by name, with its file path, component
+    count, and which one is currently active. Call this first when you do not know
+    what systems already exist -- to resume one (open_graph) or avoid clobbering it.
 
-    Refuses if a graph already exists at the configured path, to avoid silently
-    destroying work. Pass overwrite=True ONLY when the user has confirmed they
-    want to discard the existing graph and start over. If a graph already exists
-    and you mean to change it, you are in EDITING MODE -- do not call this; fetch
-    the relevant subgraph and edit instead.
+    Returns {"graphs": [{name, path, active, components, exists}], "active": name}."""
+    reg = _load_registry()
+    graphs = []
+    for name, path in reg["graphs"].items():
+        info = {"name": name, "path": path, "active": name == ACTIVE, "exists": os.path.exists(path)}
+        if info["exists"]:
+            try:
+                info["components"] = len(load_graph(path).components)
+            except Exception:
+                info["exists"] = False
+        graphs.append(info)
+    return {"graphs": graphs, "active": ACTIVE}
 
-    After this call, define ALL z=0 components and their FLOW edges before
-    decomposing anything. Work top-down, one level at a time.
 
-    Returns {"ok": True, "path": ...} or {"error": ...}.
-    """
-    global GRAPH
-    exists = GRAPH is not None or os.path.exists(GRAPH_PATH)
-    if exists and not overwrite:
+@mcp.tool()
+def new_graph(name: str, path: Optional[str] = None, overwrite: bool = False) -> dict:
+    """Create a fresh, empty graph, register it under `name`, and make it active.
+    This is the entry point for AUTHORING MODE (modeling a system from scratch).
+
+    - name: a human label for the system being modeled (letters, digits, spaces,
+      dashes, underscores), e.g. "payment-service" or "HVAC redesign".
+    - path: optional. By default the graph is stored centrally in the workspace
+      library. Pass a path (e.g. "./armature_graph.yaml") to store the file inside
+      a code repo for version control -- it is still opened later by name.
+    - overwrite: refuses if `name` is already taken or a file already exists at the
+      target, to avoid destroying work. Pass True only with explicit confirmation.
+      If the system already exists and you mean to change it, you are in EDITING
+      MODE: call open_graph(name) instead, then edit.
+
+    After this, define ALL z=0 components and their FLOW edges before decomposing.
+    Work top-down, one level at a time. Returns {"ok": True, "name", "path"} or
+    {"error": ...}."""
+    if not _valid_name(name):
+        return {"error": f"Invalid graph name '{name}'. Use letters, digits, spaces, '-' or '_'."}
+    reg = _load_registry()
+    target = os.path.abspath(path) if path else os.path.join(GRAPHS_DIR, f"{name}.yaml")
+    if (name in reg["graphs"] or os.path.exists(target)) and not overwrite:
         return {
             "error": (
-                f"A graph already exists at {GRAPH_PATH}. You are in editing mode: "
-                "fetch the relevant subgraph and edit it. To deliberately discard "
-                "the existing graph and start fresh, call new_graph(overwrite=True)."
+                f"A graph named '{name}' already exists. To resume it call "
+                f"open_graph('{name}'); to discard and recreate it pass overwrite=True."
             )
         }
-    GRAPH = Graph.new()
-    save_graph(GRAPH, GRAPH_PATH)
+    graph = Graph.new()
+    save_graph(graph, target)
+    reg["graphs"][name] = target
+    _save_registry(reg)
+    _set_active(name, graph)
     return {
         "ok": True,
-        "path": GRAPH_PATH,
-        "message": "Empty graph created. Define all z=0 components and their FLOW edges before decomposing.",
+        "name": name,
+        "path": target,
+        "message": "Empty graph created and active. Define all z=0 components and their FLOW edges before decomposing.",
     }
 
 
 @mcp.tool()
-def get_graph_stats() -> dict:
-    """Orientation tool. Returns component count, edge count, max z-level reached,
-    and the number of active (non-ignored) warnings. Call this first when you are
-    unsure whether a graph exists or how far authoring has progressed.
+def open_graph(name: str) -> dict:
+    """Make an existing graph active so you can read or edit it (EDITING MODE).
+    Use list_graphs() to see available names. Returns the same orientation summary
+    as get_graph_stats, or {"error": ...} if the name is unknown or its file is
+    missing."""
+    reg = _load_registry()
+    if name not in reg["graphs"]:
+        return {"error": f"No graph named '{name}'. Available: {list(reg['graphs']) or 'none yet'}."}
+    path = reg["graphs"][name]
+    if not os.path.exists(path):
+        return {"error": f"Graph '{name}' is registered but its file is missing at {path}."}
+    _set_active(name, load_graph(path))
+    return get_graph_stats()
 
-    Returns {"error": ...} if no graph exists yet (call new_graph first)."""
+
+@mcp.tool()
+def get_graph_stats() -> dict:
+    """Orientation tool for the ACTIVE graph: its name, file path, project root,
+    component/edge counts, max z-level reached, and active (non-ignored) warning
+    count. Call this when unsure what is open or how far authoring has progressed.
+
+    Returns {"error": ...} with the list of available graphs if none is open."""
     if GRAPH is None:
-        return {"error": "No graph exists. Call new_graph() to start authoring."}
+        return _no_active()
     GRAPH.warnings = run_all_warnings(GRAPH)
-    save_graph(GRAPH, GRAPH_PATH)
+    save_graph(GRAPH, _active_path())
     max_z = max((c.z_level for c in GRAPH.components.values()), default=0)
     return {
+        "name": ACTIVE,
+        "graph_path": _active_path(),
+        "project_root": _project_root(),
         "components": len(GRAPH.components),
         "edges": len(GRAPH.edges),
         "max_z_level": max_z,
@@ -215,7 +336,7 @@ def get_component(component_id: str) -> dict:
     To resolve edge ids into neighbor components, use get_neighbors. Returns the
     component dict or {"error": ...}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     c, err = _fetch(component_id)
     return err or _comp_dict(c)
 
@@ -231,7 +352,7 @@ def get_neighbors(component_id: str, edge_type: str, upstream: bool = False) -> 
 
     Returns {"neighbors": [component, ...]} or {"error": ...}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     et, err = _parse_edge_type(edge_type)
     if err:
         return err
@@ -252,7 +373,7 @@ def get_references(component_id: str, incoming: bool = False) -> dict:
     incoming=False returns components this one references; incoming=True returns
     components that reference this one. Returns {"references": [...]} or {"error"}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     _, err = _fetch(component_id)
     if err:
         return err
@@ -267,7 +388,7 @@ def search_components(query: str) -> dict:
 
     Returns {"matches": [component, ...]}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     q = query.lower()
     matches = [
         c
@@ -288,7 +409,7 @@ def get_subgraph(component_id: str, depth: int = -1) -> dict:
 
     Returns {"components": [...]} in pre-order, or {"error": ...}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     _, err = _fetch(component_id)
     if err:
         return err
@@ -302,7 +423,7 @@ def get_path(from_id: str, to_id: str) -> dict:
     {"path": None} if no FLOW path connects them. REFERENCE and SCOPE edges are
     not traversed."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     for cid in (from_id, to_id):
         _, err = _fetch(cid)
         if err:
@@ -318,7 +439,7 @@ def get_impact(component_id: str) -> dict:
 
     Returns {"upstream": [...], "downstream": [...]} or {"error": ...}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     _, err = _fetch(component_id)
     if err:
         return err
@@ -343,7 +464,7 @@ def get_active_warnings() -> dict:
 
     Returns {"warnings": [...]}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     _persist()
     return {"warnings": [_warn_dict(w) for w in _active_warnings(GRAPH.warnings)]}
 
@@ -358,7 +479,7 @@ def get_component_code(component_id: str) -> dict:
     Paths resolve relative to the project root. Returns {"locations": [{path,
     start_line, end_line, code}]} or {"error": ...}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     c, err = _fetch(component_id)
     if err:
         return err
@@ -366,7 +487,7 @@ def get_component_code(component_id: str) -> dict:
         return {"error": f"Component '{component_id}' has no locations set."}
     out = []
     for loc in c.locations:
-        abspath = os.path.join(PROJECT_ROOT, loc.path)
+        abspath = os.path.join(_project_root(), loc.path)
         try:
             with open(abspath) as f:
                 lines = f.readlines()
@@ -418,7 +539,7 @@ def propose_component(
     block the write and come back as {"ok": False, "errors": [...]}. On success
     returns {"ok": True, "active_warnings": [...]} -- review those to VERIFY."""
     if GRAPH is None:
-        return {"error": "No graph exists. Call new_graph() first."}
+        return _no_active()
     locs = [
         FileLocation(
             path=loc["path"],
@@ -461,7 +582,7 @@ def update_component(component_id: str, fields: dict) -> dict:
     primitive). Returns {"ok": True, "active_warnings": [...]} or
     {"ok": False, "errors": [...]}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     _, err = _fetch(component_id)
     if err:
         return err
@@ -490,7 +611,7 @@ def delete_component(component_id: str) -> dict:
     delete or re-parent the children first. Returns {"ok": True} or
     {"ok": False, "errors": [...]}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     c, err = _fetch(component_id)
     if err:
         return err
@@ -522,7 +643,7 @@ def propose_edge(edge_type: str, from_id: str, to_id: str) -> dict:
 
     Returns {"ok": True, "active_warnings": [...]} or {"ok": False, "errors": [...]}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     et, err = _parse_edge_type(edge_type)
     if err:
         return err
@@ -542,7 +663,7 @@ def ignore_warning(warning_id: str, reason: str) -> dict:
 
     Returns {"ok": True} or {"ok": False, "error": ...}."""
     if GRAPH is None:
-        return {"error": "No graph exists."}
+        return _no_active()
     GRAPH.warnings = run_all_warnings(GRAPH)
     try:
         _ignore_warning(GRAPH.warnings, warning_id, reason)

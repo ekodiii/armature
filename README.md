@@ -1,10 +1,11 @@
 # Armature
 
-A graph-based project organization system that lets humans and LLMs plan,
-navigate, and execute work on large engineering systems. **The graph is the
-design artifact.** Instead of dumping a whole codebase into an LLM's context, the
-LLM navigates a queryable graph over MCP — fetching only what it needs, one zoom
-level at a time. The graph holds all memory between context wipes.
+A graph-based organization system that lets humans and LLMs plan, navigate, and
+execute work on large engineering systems of any kind — software, mechanical,
+electrical, process, organizational. **The graph is the design artifact.** Instead
+of holding an entire system in context, the LLM navigates a queryable graph over
+MCP — fetching only what it needs, one zoom level at a time. The graph holds all
+memory between context wipes.
 
 For the full design rationale, see [`projectdesc.md`](projectdesc.md).
 
@@ -52,52 +53,64 @@ Run the MCP server (stdio transport):
 uv run python server.py
 ```
 
-### Configuration
+### Workspace
 
-The server is configured entirely through environment variables:
+You keep many **named graphs**, one per system you're modeling. They live in a
+central library and are selected by name at runtime — there is **no dependency on a
+working directory**, so the exact same setup works on a terminal, a desktop app, or
+the web. The model drives it with three tools: `list_graphs()`, `new_graph(name)`,
+`open_graph(name)`. One graph is *active* per session, and the last-active one is
+remembered across restarts.
 
-| Variable                | Default                        | Purpose |
-|-------------------------|--------------------------------|---------|
-| `ARMATURE_GRAPH_PATH`   | `./armature_graph.yaml`        | where the graph YAML for this project lives |
-| `ARMATURE_PROJECT_ROOT` | directory of the graph file    | root that `get_component_code` resolves `FileLocation.path` against |
+```
+~/.armature/
+├── registry.json          # name -> file path, plus the active graph
+└── graphs/
+    ├── hvac-redesign.yaml
+    └── payment-service.yaml
+```
 
-Point `ARMATURE_GRAPH_PATH` at the project you're modeling so each project keeps
-its own version-controllable graph.
+A graph's file can also live **inside a code repo** for version control — pass a
+path when creating it (`new_graph("payments", path="./armature_graph.yaml")`) and
+it's still opened later by name. Relative `FileLocation` paths (used by
+`get_component_code`) then resolve against that repo automatically.
+
+Optional environment variables:
+
+| Variable                | Default          | Purpose |
+|-------------------------|------------------|---------|
+| `ARMATURE_HOME`         | `~/.armature`    | where the graph library and registry live |
+| `ARMATURE_PROJECT_ROOT` | dir of the active graph file | override the root that `get_component_code` resolves paths against |
 
 ---
 
 ## Registering with a client
 
+The same command works everywhere — call the venv's Python directly, no env vars
+and no working-directory assumptions:
+
 ### Claude Code (CLI)
 
 ```bash
-claude mcp add armature \
-  --env ARMATURE_GRAPH_PATH=/abs/path/to/your-project/armature_graph.yaml \
-  --env ARMATURE_PROJECT_ROOT=/abs/path/to/your-project \
-  -- uv run --directory /abs/path/to/armature python server.py
+claude mcp add armature -- /abs/path/to/armature/.venv/bin/python /abs/path/to/armature/server.py
 ```
 
-### Claude Desktop (JSON)
-
-Add to `claude_desktop_config.json`:
+### Claude Desktop (and any stdio MCP client)
 
 ```json
 {
   "mcpServers": {
     "armature": {
-      "command": "uv",
-      "args": ["run", "--directory", "/abs/path/to/armature", "python", "server.py"],
-      "env": {
-        "ARMATURE_GRAPH_PATH": "/abs/path/to/your-project/armature_graph.yaml",
-        "ARMATURE_PROJECT_ROOT": "/abs/path/to/your-project"
-      }
+      "command": "/abs/path/to/armature/.venv/bin/python",
+      "args": ["/abs/path/to/armature/server.py"]
     }
   }
 }
 ```
 
-Any MCP client that speaks stdio works the same way: run `uv run python server.py`
-with the two env vars set.
+In both cases the model starts by calling `list_graphs()` and then `open_graph` or
+`new_graph`. `get_graph_stats` reports the active graph's name and resolved paths
+so you can confirm what you're working on at any time.
 
 ---
 
@@ -123,15 +136,16 @@ surface as slash commands.)
 
 ## Two modes
 
-Same tools, different framing — pick based on whether a graph already exists.
+Same tools, different framing — pick based on whether the system already has a graph
+(`list_graphs()` tells you).
 
-**Authoring** (graph does not exist): call `new_graph()`, then define **all** `z=0`
-components and their `FLOW` edges before decomposing anything. Work top-down, one
-level at a time. A context wipe between levels is expected — re-fetch the component
-you're decomposing to re-orient.
+**Authoring** (new system): `new_graph(name)`, then define **all** `z=0` components
+and their `FLOW` edges before decomposing anything. Work top-down, one level at a
+time. A context wipe between levels is expected — re-fetch the component you're
+decomposing to re-orient.
 
-**Editing** (graph exists): fetch the relevant subgraph first, make only changes
-within the scope of the task, verify edges after each write.
+**Editing** (existing system): `open_graph(name)`, fetch the relevant subgraph
+first, make only changes within the scope of the task, verify edges after each write.
 
 **Execution protocol (both modes):** ORIENT → PLAN → WRITE → VERIFY → REPEAT.
 Fetch before touching, propose one component at a time, re-fetch to confirm edges
@@ -141,10 +155,13 @@ and active warnings are clean.
 
 ## Tool reference
 
-**Graph**
-- `new_graph(overwrite=False)` — create a fresh graph; refuses to clobber an
-  existing one unless `overwrite=True`.
-- `get_graph_stats()` — component/edge counts, max `z_level`, active warning count.
+**Workspace / graph**
+- `list_graphs()` — all named graphs, paths, component counts, which is active.
+- `new_graph(name, path=None, overwrite=False)` — create a named graph (central by
+  default, or at `path` to store it in a repo); refuses to clobber unless `overwrite=True`.
+- `open_graph(name)` — make an existing graph active (returns its stats).
+- `get_graph_stats()` — active graph's name, paths, component/edge counts, max
+  `z_level`, active warning count.
 
 **Read**
 - `get_component(component_id)`
