@@ -669,7 +669,7 @@ def ignore_warning(warning_id: str, reason: str) -> dict:
         _ignore_warning(GRAPH.warnings, warning_id, reason)
     except KeyError:
         return {"ok": False, "error": f"Warning '{warning_id}' not found among active warnings."}
-    save_graph(GRAPH, GRAPH_PATH)
+    save_graph(GRAPH, _active_path())
     return {"ok": True, "ignored": warning_id}
 
 

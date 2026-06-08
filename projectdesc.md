@@ -110,11 +110,13 @@ class Edge:
         return f"{self.from_id}__{self.to_id}__{self.edge_type.value}"
 ```
 
-**Components track their own connections.** edges_in, edges_out, and children are lists of ids on the component. Redundant with the graph's edge dict but makes traversal O(1) from the component itself. Validator enforces they stay in sync.
+**Components track their own connections.** edges_in, edges_out, and children are lists of ids on the component. Redundant with the graph's edge dict but makes traversal O(1) from the component itself. These are *derived state*: rebuilt in memory on load from the edge list + parent_id, never serialized. validate_consistency() checks they stay in sync.
+
+**Serialization stores only authoritative state.** parent_id is the source of truth for the hierarchy, so SCOPE edges are regenerated from it on load rather than written. edges_in/edges_out/children are rebuilt on load. Warnings are recomputed on load; only the *ignore decisions* (id + reason) persist. This keeps the yaml roughly an order of magnitude smaller than serializing every derived field.
 
 **Store is pure operations, no validation.** writer.py gates all writes through validator.py. store.py just does the mechanical work.
 
-**Warnings are non-blocking and persistent.** Every warning includes enough context to decide whether to ignore it. Ignored state persists on the graph across sessions so the LLM doesn't re-surface dismissed warnings.
+**Warnings are non-blocking; only ignore decisions persist.** Every warning includes enough context to decide whether to ignore it. Warnings themselves are derived (recomputed each run); the persisted ignore decisions are re-applied by id so the LLM doesn't re-surface dismissed warnings across sessions.
 
 **Warning types currently implemented:**
 - hanging_output -- output type with no downstream consumer
@@ -182,7 +184,7 @@ class Warning:
     ignore_reason: Optional[str] = None
 ```
 
-Warnings live on the graph and are serialized to yaml. Ignored state persists across sessions.
+Warnings live on the graph but are derived: recomputed on every run from the current graph state. Only the ignore decisions (warning id + reason) are serialized, and re-applied by id on load, so ignored state persists across sessions without storing the warnings themselves.
 
 ---
 
@@ -215,6 +217,13 @@ The graph holds all memory between context wipes. The LLM can always reconstruct
 - multi-graph support -- separate graphs per service/layer with an integration graph at the boundary
 - graph database backend (neo4j) for scale, yaml stays as human-facing export format
 - optimistic concurrency (version field on components already in place)
+- cross-domain translation (general-engineering only -- not a concern for single-domain software graphs)
+  - problem: a value that is a single typed I/O in one domain (one electronics signal) gets unpacked into many orthogonal concerns in another (payload / clock / parity / flow-control in firmware). representation is not conserved across the seam, so string-equality type matching makes every domain boundary look broken -- both hanging_output and starved_input fire on a perfectly correct edge.
+  - not a ports problem: input/output are already lists, so cardinality is fine. the pressure is on two assumptions: (a) one shared type vocabulary across the whole graph, and (b) type continuity across edges.
+  - transducer nodes: model a domain boundary as an explicit node (same move as auth/logging), whose declared job is translation. input vocabulary != output vocabulary by design, and continuity warnings are suppressed there only. do NOT relax the one-in/one-out discipline globally.
+  - domain tag on components: makes seams detectable (warn on a cross-domain edge with no transducer), scopes type names so the same name in two domains stops colliding, and seeds the multi-graph split.
+  - dimensional explosion = decomposition, not a type calculus: bridge the seam with a single composite type and let it unpack as ordinary z-level decomposition inside the target domain. keep types as bare strings; never build structured types.
+  - the boundary is also a cross-parent crossing: domains are separate subtrees, so the same node is a leaf (exit) in one domain and a source (root) in another. this is the strongest case for promoting REFERENCE to a first-class interface edge, or for multi-graph with a shared integration boundary -- two domain views agreeing on an interface contract.
 
 **v3:**
 - multi-user with task scope as lock primitive
