@@ -63,6 +63,16 @@ def delete_component(graph: Graph, component_id: str) -> None:
     remove_component(graph, get_component(graph, component_id))
 
 
+def mark_implemented(graph: Graph, component_id: str) -> list[str]:
+    """Record that the component's code has been written against its current spec
+    version. Does not bump version (the spec did not change); it advances the
+    implemented marker to match. After any later update_component the version moves
+    ahead again and the component reads as stale."""
+    component = get_component(graph, component_id)
+    component.implemented_version = component.version
+    return []
+
+
 # Edge Functions #
 def propose_edge(graph: Graph, edge: Edge) -> list[str]:
     if edge.edge_id in graph.edges:

@@ -253,6 +253,519 @@ components:
     parent_id: null
     version: 2
     locations: []
+  si_dir_walker:
+    component_id: si_dir_walker
+    description: Recursively walks the source root, applies .gitignore rules, and
+      emits a list of raw file paths to read
+    processing: 'Receives RawFiles (the directory root handle from ext_filesystem).
+      Walks the tree depth-first. Reads .gitignore from root and any nested .gitignore
+      files; compiles patterns and filters. Skips hidden dirs (.git, .venv, node_modules).
+      Emits FilePaths: a list of {absolute_path, relative_path} records for every
+      surviving file.'
+    input_types:
+    - RawFiles
+    output_types:
+    - FilePaths
+    z_level: 1
+    external: false
+    parent_id: source_ingestion
+    version: 1
+    locations:
+    - path: translator/source_ingestion.py
+      start_line: 42
+      end_line: 71
+  si_file_reader:
+    component_id: si_file_reader
+    description: Reads raw bytes for each path and decodes to text; skips binary files
+    processing: 'Iterates FilePaths. For each path: opens with UTF-8, falls back to
+      latin-1 if decode fails, skips if still unreadable (logs skip). Produces RawFileContents:
+      list of {relative_path, text} records. Binary detection: skip if null bytes
+      in first 8KB.'
+    input_types:
+    - FilePaths
+    output_types:
+    - RawFileContents
+    z_level: 1
+    external: false
+    parent_id: source_ingestion
+    version: 1
+    locations:
+    - path: translator/source_ingestion.py
+      start_line: 74
+      end_line: 90
+  si_language_classifier:
+    component_id: si_language_classifier
+    description: Assigns a language tag to each file from its extension; groups into
+      FileManifest
+    processing: "Maps extensions to language tags: .py\u2192python, .ts/.tsx\u2192\
+      typescript, .js/.jsx\u2192javascript, .rs\u2192rust, .go\u2192go, unknown\u2192\
+      other. Attaches tag to each RawFileContents record and emits FileManifest: list\
+      \ of {relative_path, language, text}. Files tagged \"other\" pass through to\
+      \ static_analysis but are skipped by both parsers \u2014 their structure won't\
+      \ be extracted, only their locations recorded."
+    input_types:
+    - RawFileContents
+    output_types:
+    - FileManifest
+    z_level: 1
+    external: false
+    parent_id: source_ingestion
+    version: 1
+    locations:
+    - path: translator/source_ingestion.py
+      start_line: 93
+      end_line: 104
+  sa_file_dispatcher:
+    component_id: sa_file_dispatcher
+    description: Splits FileManifest by language tag so each parser only sees files
+      it can handle
+    processing: "Partitions FileManifest into two buckets: language==python goes to\
+      \ the Python AST path; everything else goes to the tree-sitter path. Emits DispatchedFiles:\
+      \ {python: [...], generic: [...]}. Files tagged \"other\" land in generic but\
+      \ will produce empty node lists \u2014 this is not an error."
+    input_types:
+    - FileManifest
+    output_types:
+    - DispatchedFiles
+    z_level: 1
+    external: false
+    parent_id: static_analysis
+    version: 1
+    locations:
+    - path: translator/static_analysis.py
+      start_line: 12
+      end_line: 17
+  sa_ast_extractor:
+    component_id: sa_ast_extractor
+    description: Calls ext_python_ast for Python files and ext_tree_sitter for all
+      others; normalises both outputs into a common RawNodes schema
+    processing: 'For Python files: calls ast.parse(text), walks the tree collecting
+      Module, ClassDef, FunctionDef, AsyncFunctionDef nodes with their name, args,
+      return annotation, decorators, and line spans. For generic files: calls tree_sitter
+      parser for the matching language grammar, walks the CST for function_definition
+      / class_declaration / method_definition equivalents. Normalises both into RawNodes:
+      list of {node_id (path::qualified_name), kind (module|class|function), params,
+      return_hint, start_line, end_line, relative_path, raw_imports, raw_calls}.'
+    input_types:
+    - DispatchedFiles
+    output_types:
+    - RawNodes
+    z_level: 1
+    external: false
+    parent_id: static_analysis
+    version: 1
+    locations:
+    - path: translator/static_analysis.py
+      start_line: 209
+      end_line: 216
+  sa_dependency_resolver:
+    component_id: sa_dependency_resolver
+    description: Builds the import graph and intra-project call graph from raw_imports
+      and raw_calls on each node
+    processing: "Two passes: (1) import resolution \u2014 for each raw_import, resolve\
+      \ to a node_id if it maps to a file in the project, otherwise mark as external_import.\
+      \ (2) call resolution \u2014 for each raw_call, fuzzy-match against known node_ids\
+      \ in scope. Emits ResolvedNodes: RawNodes plus {imports: [node_id|external_import],\
+      \ calls: [node_id|unresolved]} on each node. Unresolved calls are kept as strings\
+      \ for the external_detector pass."
+    input_types:
+    - RawNodes
+    output_types:
+    - ResolvedNodes
+    z_level: 1
+    external: false
+    parent_id: static_analysis
+    version: 1
+    locations:
+    - path: translator/static_analysis.py
+      start_line: 223
+      end_line: 251
+  sa_external_detector:
+    component_id: sa_external_detector
+    description: Flags nodes as external=true if they represent third-party library
+      boundaries, stdlib entries, or UI/network entry points
+    processing: "Checks each node against three rules: (1) only has external_imports,\
+      \ no inbound internal calls \u2192 likely external; (2) node_id path matches\
+      \ a known stdlib or third-party package prefix; (3) kind==module with no children\
+      \ and only outbound imports. Sets external=true on matching nodes. Also promotes\
+      \ any unresolved call targets to synthetic external stub nodes so the call graph\
+      \ has no dangling edges. Emits TaggedNodes: ResolvedNodes with external flag\
+      \ set."
+    input_types:
+    - ResolvedNodes
+    output_types:
+    - TaggedNodes
+    z_level: 1
+    external: false
+    parent_id: static_analysis
+    version: 1
+    locations:
+    - path: translator/static_analysis.py
+      start_line: 270
+      end_line: 312
+  sa_location_mapper:
+    component_id: sa_location_mapper
+    description: Attaches FileLocation records to every node and packages the result
+      as the final StructureMap
+    processing: "For each TaggedNode, constructs a FileLocation{path: relative_path,\
+      \ start_line, end_line} from the node's source span. Assembles StructureMap:\
+      \ {nodes: [TaggedNode + locations], call_edges: [(from_id, to_id)], import_edges:\
+      \ [(from_id, to_id|external)]}. This is the complete structural picture before\
+      \ any LLM annotation \u2014 types and descriptions are still absent."
+    input_types:
+    - TaggedNodes
+    output_types:
+    - StructureMap
+    z_level: 1
+    external: false
+    parent_id: static_analysis
+    version: 1
+    locations:
+    - path: translator/static_analysis.py
+      start_line: 319
+      end_line: 335
+  la_traversal_orderer:
+    component_id: la_traversal_orderer
+    description: Topologically sorts StructureMap nodes bottom-up (leaves first) so
+      the LLM annotates callees before callers
+    processing: "Builds a DAG from call_edges and import_edges in the StructureMap.\
+      \ Runs Kahn's algorithm to produce a reverse-topological order (leaves \u2014\
+      \ nodes with no outbound calls inside the project \u2014 come first). Cycles\
+      \ (mutual recursion) are broken by picking the alphabetically-first node and\
+      \ emitting a CYCLE_NOTE tag. Emits OrderedNodes: the same node list in annotation\
+      \ order, with each node carrying a depth integer (0 = leaf)."
+    input_types:
+    - StructureMap
+    output_types:
+    - OrderedNodes
+    z_level: 1
+    external: false
+    parent_id: llm_annotation
+    version: 1
+    locations:
+    - path: translator/llm_annotation.py
+      start_line: 24
+      end_line: 64
+  la_batch_annotator:
+    component_id: la_batch_annotator
+    description: "Core LLM reasoning loop \u2014 for each node in order, infers Armature\
+      \ input_types, output_types, and a processing description by reasoning over\
+      \ its source context and already-annotated neighbours"
+    processing: 'Iterates OrderedNodes. For each node: (1) builds a context window
+      from its source snippet, signature, and the already-annotated types of its callees
+      (available because we process bottom-up); (2) the LLM reasons inline and emits
+      an AnnotationResult{input_types, output_types, processing, external} as a structured
+      tool call or JSON response; (3) result is stored keyed by node_id for use by
+      later nodes in the same pass. Nodes flagged external=true by sa_external_detector
+      skip type inference and get a minimal annotation. Emits AnnotatedNodes: OrderedNodes
+      with annotation fields attached.'
+    input_types:
+    - OrderedNodes
+    output_types:
+    - AnnotatedNodes
+    z_level: 1
+    external: false
+    parent_id: llm_annotation
+    version: 1
+    locations:
+    - path: translator/llm_annotation.py
+      start_line: 133
+      end_line: 156
+  la_annotation_merger:
+    component_id: la_annotation_merger
+    description: Merges per-node LLM annotations back into the StructureMap shape,
+      producing a fully-annotated structure ready for graph_synthesis
+    processing: "Takes AnnotatedNodes (ordered) and restores original StructureMap\
+      \ topology: rebuilds call_edges and import_edges, reattaches FileLocations,\
+      \ and stamps each node with its annotation fields. Validates that every non-external\
+      \ node has non-empty input_types and output_types; nodes that slipped through\
+      \ unannotated get an undefined_types marker (not a hard error \u2014 graph_synthesis\
+      \ will emit an orphaned component warning for them). Emits AnnotatedStructure."
+    input_types:
+    - AnnotatedNodes
+    output_types:
+    - AnnotatedStructure
+    z_level: 1
+    external: false
+    parent_id: llm_annotation
+    version: 1
+    locations:
+    - path: translator/llm_annotation.py
+      start_line: 163
+      end_line: 183
+  lba_context_builder:
+    component_id: lba_context_builder
+    description: 'Assembles the annotation prompt context for one node: source snippet,
+      signature, and already-annotated types of its direct callees'
+    processing: "For the current node: reads its source snippet via its FileLocation\
+      \ (start_line:end_line from the original FileManifest text). Extracts signature\
+      \ (param names + type hints, return annotation). Looks up each direct callee\
+      \ in the running annotation cache (populated by previous iterations) and includes\
+      \ their output_types. Produces an AnnotationContext{node_id, snippet, signature,\
+      \ callee_types, external_flag} \u2014 the complete, self-contained input for\
+      \ the LLM inference step. External nodes receive a minimal context with no snippet."
+    input_types:
+    - OrderedNodes
+    output_types:
+    - AnnotationContext
+    z_level: 2
+    external: false
+    parent_id: la_batch_annotator
+    version: 1
+    locations:
+    - path: translator/llm_annotation.py
+      start_line: 71
+      end_line: 98
+  lba_type_inferrer:
+    component_id: lba_type_inferrer
+    description: 'LLM inline step: given the annotation context, infers Armature-style
+      input_types and output_types as short bare strings'
+    processing: 'Receives AnnotationContext. The LLM reasons: what does this function/class
+      consume (input_types) and produce (output_types)? Guided by three rules: (1)
+      prefer the callee''s output_type as this node''s input_type if there is exactly
+      one callee; (2) keep types as bare nouns (UserRecord, not Dict[str, Any]); (3)
+      a node with side effects only (logging, writing) gets output_type=SideEffect.
+      Emits TypedContext: AnnotationContext + {input_types: [str], output_types: [str],
+      external: bool}. Stores result in the shared annotation cache keyed by node_id
+      before yielding.'
+    input_types:
+    - AnnotationContext
+    output_types:
+    - TypedContext
+    z_level: 2
+    external: false
+    parent_id: la_batch_annotator
+    version: 1
+    locations:
+    - path: translator/llm_annotation.py
+      start_line: 105
+      end_line: 117
+  lba_description_writer:
+    component_id: lba_description_writer
+    description: 'LLM inline step: writes a one-sentence processing description for
+      the node given its typed context'
+    processing: "Receives TypedContext. The LLM writes a single sentence describing\
+      \ what this component does in terms of its input and output types: \"Receives\
+      \ X, does Y, emits Z.\" Constrained to \u226420 words. External nodes get \"\
+      Atomic external boundary \u2014 [inferred role].\" Emits AnnotatedNode: the\
+      \ fully annotated record ready to be stored. This is the last per-node step;\
+      \ after this the node is added to AnnotatedNodes and the loop advances."
+    input_types:
+    - TypedContext
+    output_types:
+    - AnnotatedNodes
+    z_level: 2
+    external: false
+    parent_id: la_batch_annotator
+    version: 1
+    locations:
+    - path: translator/llm_annotation.py
+      start_line: 124
+      end_line: 126
+  gs_component_builder:
+    component_id: gs_component_builder
+    description: Maps each AnnotatedStructure node to an Armature Component object,
+      assigning component_id, z_level, parent_id, and FileLocation
+    processing: "For each node: slugifies the module-qualified name into a component_id\
+      \ (e.g. translator.store.add_component \u2192 translator__store__add_component).\
+      \ Computes z_level as call-graph depth from the root modules (modules=0, classes=1,\
+      \ methods=2 within their class, top-level functions=1). Sets parent_id: methods\
+      \ are children of their class; top-level functions are children of their module\
+      \ component. Copies input_types, output_types, processing, external, and FileLocation\
+      \ from the annotation. Constructs Component objects via ext_armature_models.\
+      \ Emits ComponentSet: list of Component objects in no particular order."
+    input_types:
+    - AnnotatedStructure
+    output_types:
+    - ComponentSet
+    z_level: 1
+    external: false
+    parent_id: graph_synthesis
+    version: 1
+    locations:
+    - path: translator/graph_synthesis.py
+      start_line: 52
+      end_line: 84
+  gs_edge_resolver:
+    component_id: gs_edge_resolver
+    description: "Derives FLOW and REFERENCE edges from the call/import graph; applies\
+      \ the sibling rule \u2014 cross-parent connections become REFERENCE, same-parent\
+      \ connections become FLOW"
+    processing: "Iterates call_edges and import_edges from AnnotatedStructure. For\
+      \ each (from_id, to_id) pair: looks up both nodes' parent_id in ComponentSet.\
+      \ If parent_ids match \u2192 FLOW edge. If parent_ids differ \u2192 REFERENCE\
+      \ edge (cross-boundary, allowed to cross levels). Deduplicates edges. Skips\
+      \ self-loops. External stub nodes only receive REFERENCE edges, never FLOW.\
+      \ Emits ComponentsWithEdges: {components: ComponentSet, edges: list of Edge\
+      \ objects constructed via ext_armature_models}."
+    input_types:
+    - ComponentSet
+    output_types:
+    - ComponentsWithEdges
+    z_level: 1
+    external: false
+    parent_id: graph_synthesis
+    version: 1
+    locations:
+    - path: translator/graph_synthesis.py
+      start_line: 91
+      end_line: 128
+  gs_hierarchy_validator:
+    component_id: gs_hierarchy_validator
+    description: 'Pre-flight check: verifies parent chains are acyclic, z_levels are
+      consistent with depth, and no FLOW edge crosses parents before handing off to
+      the writer'
+    processing: "Three checks: (1) parent_id DAG \u2014 walks parent chains, detects\
+      \ cycles, reports offending component_ids; (2) z_level consistency \u2014 every\
+      \ component's z_level must equal parent.z_level + 1 for non-root nodes; (3)\
+      \ FLOW sibling rule \u2014 every FLOW edge's from/to must share the same parent_id.\
+      \ Failures are collected as ValidationIssues (not hard errors \u2014 graph_commit's\
+      \ error_collector handles them). Emits ValidatedDraft: ComponentsWithEdges +\
+      \ {validation_issues: list[str]}. A clean run has an empty list."
+    input_types:
+    - ComponentsWithEdges
+    output_types:
+    - ValidatedDraft
+    z_level: 1
+    external: false
+    parent_id: graph_synthesis
+    version: 1
+    locations:
+    - path: translator/graph_synthesis.py
+      start_line: 135
+      end_line: 170
+  gs_draft_assembler:
+    component_id: gs_draft_assembler
+    description: Packages the validated component and edge lists into a GraphDraft
+      bundle ready for graph_commit
+    processing: "Takes ValidatedDraft. Serialises into GraphDraft: {components: list[Component],\
+      \ edges: list[Edge], validation_issues: list[str], source_root: str, stats:\
+      \ {total, external_count, edge_count}}. This is a pure data-packaging step \u2014\
+      \ no logic, no I/O. GraphDraft is the contract between graph_synthesis and graph_commit;\
+      \ nothing in graph_commit should need to reach back into AnnotatedStructure."
+    input_types:
+    - ValidatedDraft
+    output_types:
+    - GraphDraft
+    z_level: 1
+    external: false
+    parent_id: graph_synthesis
+    version: 1
+    locations:
+    - path: translator/graph_synthesis.py
+      start_line: 177
+      end_line: 194
+  gc_topological_sorter:
+    component_id: gc_topological_sorter
+    description: Sorts GraphDraft components parents-before-children so propose_component
+      never references a parent_id that hasn't been written yet
+    processing: "Builds a dependency graph where each component with a parent_id depends\
+      \ on its parent. Runs Kahn's algorithm. Produces SortedDraft: GraphDraft with\
+      \ components list replaced by a topologically-ordered list. Edges list is unchanged\
+      \ \u2014 edges are written after all components. Any component whose parent_id\
+      \ is missing from the draft is flagged as an orphan in SortedDraft.issues (written\
+      \ last with parent_id=None as a fallback)."
+    input_types:
+    - GraphDraft
+    output_types:
+    - SortedDraft
+    z_level: 1
+    external: false
+    parent_id: graph_commit
+    version: 1
+    locations:
+    - path: translator/graph_commit.py
+      start_line: 21
+      end_line: 64
+  gc_component_writer:
+    component_id: gc_component_writer
+    description: Iterates sorted components and calls ext_armature_writer.propose_component
+      for each; accumulates per-component write results
+    processing: "For each Component in SortedDraft: calls propose_component(component_id,\
+      \ description, processing, input_types, output_types, z_level, external, parent_id,\
+      \ locations). Captures the ok/errors response. Never aborts on error \u2014\
+      \ records {component_id, ok, errors} into WriteLog and continues. Emits WriteLog:\
+      \ {written: [component_id], failed: [{component_id, errors}], active_warnings_snapshot:\
+      \ [...]}."
+    input_types:
+    - SortedDraft
+    output_types:
+    - WriteLog
+    z_level: 1
+    external: false
+    parent_id: graph_commit
+    version: 1
+    locations:
+    - path: translator/graph_commit.py
+      start_line: 71
+      end_line: 82
+  gc_edge_writer:
+    component_id: gc_edge_writer
+    description: Iterates the edge list and calls ext_armature_writer.propose_edge
+      for each; skips edges whose endpoints failed to write
+    processing: "Reads SortedDraft.edges and WriteLog.written. For each Edge: if both\
+      \ from_id and to_id are in written, calls propose_edge(edge_type, from_id, to_id).\
+      \ If either endpoint is in failed, records a skipped_edge entry instead \u2014\
+      \ never calls propose_edge with a dangling id. Appends edge results to WriteLog:\
+      \ adds edge_written, edge_failed, and edge_skipped lists. Emits the augmented\
+      \ WriteLog."
+    input_types:
+    - WriteLog
+    output_types:
+    - WriteLog
+    z_level: 1
+    external: false
+    parent_id: graph_commit
+    version: 1
+    locations:
+    - path: translator/graph_commit.py
+      start_line: 89
+      end_line: 115
+  gc_error_collector:
+    component_id: gc_error_collector
+    description: Summarises all write failures and pre-flight validation issues into
+      a human-readable MigrationReport
+    processing: "Reads final WriteLog + SortedDraft.issues. Produces MigrationReport:\
+      \ {summary: \"X components written, Y failed, Z edges written, W skipped\",\
+      \ failures: [{component_id, errors}], skipped_edges: [...], validation_issues:\
+      \ [...], active_warnings: [...]}. If failures is non-empty, prints the report\
+      \ as a warning but does NOT abort \u2014 partial graphs are valid and the implementer\
+      \ can re-run the migration for failed nodes. Emits MigrationReport."
+    input_types:
+    - WriteLog
+    output_types:
+    - MigrationReport
+    z_level: 1
+    external: false
+    parent_id: graph_commit
+    version: 1
+    locations:
+    - path: translator/graph_commit.py
+      start_line: 122
+      end_line: 142
+  gc_persist_trigger:
+    component_id: gc_persist_trigger
+    description: 'Fires the _persist pattern: recomputes all warnings then saves the
+      graph to YAML; returns a GraphDraft as a completion signal'
+    processing: "Calls ext_armature_warnings.run_all_warnings(graph) to recompute\
+      \ the warning set (preserving any ignored decisions already on the graph). Then\
+      \ calls ext_armature_serializer.save_graph(graph, path) to flush to YAML. Re-reads\
+      \ the active warning count and appends it to MigrationReport. Emits GraphDraft\
+      \ (the same draft it received, now a no-op pass-through) as the exit signal\
+      \ \u2014 this is what graph_commit outputs to ext_armature_writer at the parent\
+      \ z=0 level to close the write-stack FLOW chain."
+    input_types:
+    - MigrationReport
+    output_types:
+    - GraphDraft
+    z_level: 1
+    external: false
+    parent_id: graph_commit
+    version: 1
+    locations:
+    - path: translator/graph_commit.py
+      start_line: 149
+      end_line: 160
 edges:
 - edge_type: FLOW
   from_id: ext_filesystem
@@ -293,4 +806,85 @@ edges:
 - edge_type: REFERENCE
   from_id: ext_armature_writer
   to_id: ext_armature_validator
-warnings: []
+- edge_type: FLOW
+  from_id: si_dir_walker
+  to_id: si_file_reader
+- edge_type: FLOW
+  from_id: si_file_reader
+  to_id: si_language_classifier
+- edge_type: FLOW
+  from_id: sa_file_dispatcher
+  to_id: sa_ast_extractor
+- edge_type: FLOW
+  from_id: sa_ast_extractor
+  to_id: sa_dependency_resolver
+- edge_type: FLOW
+  from_id: sa_dependency_resolver
+  to_id: sa_external_detector
+- edge_type: FLOW
+  from_id: sa_external_detector
+  to_id: sa_location_mapper
+- edge_type: FLOW
+  from_id: la_traversal_orderer
+  to_id: la_batch_annotator
+- edge_type: FLOW
+  from_id: la_batch_annotator
+  to_id: la_annotation_merger
+- edge_type: FLOW
+  from_id: lba_context_builder
+  to_id: lba_type_inferrer
+- edge_type: FLOW
+  from_id: lba_type_inferrer
+  to_id: lba_description_writer
+- edge_type: FLOW
+  from_id: gs_component_builder
+  to_id: gs_edge_resolver
+- edge_type: FLOW
+  from_id: gs_edge_resolver
+  to_id: gs_hierarchy_validator
+- edge_type: FLOW
+  from_id: gs_hierarchy_validator
+  to_id: gs_draft_assembler
+- edge_type: FLOW
+  from_id: gc_topological_sorter
+  to_id: gc_component_writer
+- edge_type: FLOW
+  from_id: gc_component_writer
+  to_id: gc_edge_writer
+- edge_type: FLOW
+  from_id: gc_edge_writer
+  to_id: gc_error_collector
+- edge_type: FLOW
+  from_id: gc_error_collector
+  to_id: gc_persist_trigger
+- edge_type: REFERENCE
+  from_id: gc_component_writer
+  to_id: ext_armature_writer
+- edge_type: REFERENCE
+  from_id: gc_edge_writer
+  to_id: ext_armature_writer
+- edge_type: REFERENCE
+  from_id: gc_persist_trigger
+  to_id: ext_armature_warnings
+- edge_type: REFERENCE
+  from_id: gc_persist_trigger
+  to_id: ext_armature_serializer
+warnings:
+- id: hanging_output__si_language_classifier
+  ignore_reason: Exit node of source_ingestion; FileManifest flows up through the
+    parent boundary to static_analysis at z=0, not consumed within this subtree.
+- id: hanging_output__sa_location_mapper
+  ignore_reason: Exit node of static_analysis; StructureMap flows up through the parent
+    boundary to llm_annotation at z=0.
+- id: hanging_output__la_annotation_merger
+  ignore_reason: Exit node of llm_annotation; AnnotatedStructure flows up through
+    the parent boundary to graph_synthesis at z=0.
+- id: hanging_output__lba_description_writer
+  ignore_reason: Exit node of la_batch_annotator; AnnotatedNodes flows up through
+    the parent boundary to la_annotation_merger at z=1.
+- id: hanging_output__gs_draft_assembler
+  ignore_reason: Exit node of graph_synthesis; GraphDraft flows up through the parent
+    boundary to graph_commit at z=0.
+- id: hanging_output__gc_persist_trigger
+  ignore_reason: Exit node of graph_commit; GraphDraft flows up to the parent boundary
+    and on to ext_armature_writer at z=0 to close the write-stack FLOW chain.

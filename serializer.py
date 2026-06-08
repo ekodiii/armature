@@ -20,6 +20,7 @@ def save_graph(graph: Graph, path: str):
                 "external": c.external,
                 "parent_id": c.parent_id,
                 "version": c.version,
+                "implemented_version": c.implemented_version,
                 "locations": [
                     {
                         "path": loc.path,
@@ -69,6 +70,7 @@ def load_graph(path: str) -> Graph:
             external=c_data.get("external", False),
             parent_id=c_data.get("parent_id"),
             version=c_data.get("version", 0),
+            implemented_version=c_data.get("implemented_version"),
             locations=[
                 FileLocation(
                     path=loc["path"],

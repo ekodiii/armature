@@ -134,10 +134,11 @@ surface as slash commands.)
 
 ---
 
-## Two modes
+## Three modes
 
-Same tools, different framing — pick based on whether the system already has a graph
-(`list_graphs()` tells you).
+Same tools, different framing. Each is also exposed as an MCP **prompt**
+(`armature_author`, `armature_edit`, `armature_implement`) that loads the right
+discipline as a slash command.
 
 **Authoring** (new system): `new_graph(name)`, then define **all** `z=0` components
 and their `FLOW` edges before decomposing anything. Work top-down, one level at a
@@ -146,10 +147,33 @@ decomposing to re-orient.
 
 **Editing** (existing system): `open_graph(name)`, fetch the relevant subgraph
 first, make only changes within the scope of the task, verify edges after each write.
+Editing a component's spec bumps its `version` and flips its status to **stale** —
+its code now needs re-implementation.
 
-**Execution protocol (both modes):** ORIENT → PLAN → WRITE → VERIFY → REPEAT.
-Fetch before touching, propose one component at a time, re-fetch to confirm edges
-and active warnings are clean.
+**Implementing** (graph → code): `get_pending_implementation()` lists what's
+`planned` (never built) or `stale` (spec changed since). For each, pull
+`get_work_context(id)`, write the code to honor that contract with your own editor
+tools, then `mark_implemented(id)`.
+
+**Execution protocol (all modes):** ORIENT → PLAN → WRITE → VERIFY → REPEAT. The
+key rule: call **`get_work_context(id)` immediately before every write or
+implementation** of a component — it returns just that node's 1-hop frame (its
+contract, what it receives/must produce, parent contract, children, current code,
+its warnings), so you re-pull scoped context per change instead of holding the whole
+graph. Never write from session memory; the graph moves under you.
+
+### Component status
+
+Derived from `version` vs `implemented_version`, so it can't drift:
+
+| status        | meaning |
+|---------------|---------|
+| `planned`     | no code written yet |
+| `implemented` | code matches the current spec version |
+| `stale`       | spec was edited after the code was written — needs updating |
+
+`mark_implemented(id)` advances a component to `implemented`; any later edit
+auto-flips it back to `stale`.
 
 ---
 
@@ -165,6 +189,7 @@ and active warnings are clean.
 
 **Read**
 - `get_component(component_id)`
+- `get_work_context(component_id)` — the 1-hop frame for safely writing/implementing one node; call before every write
 - `get_neighbors(component_id, edge_type, upstream=False)`
 - `get_references(component_id, incoming=False)` — weak `REFERENCE` links only
 - `search_components(query)` — case-insensitive substring match (embedding search TBD)
@@ -173,12 +198,14 @@ and active warnings are clean.
 - `get_impact(component_id)` — upstream/downstream `FLOW` reachability
 - `get_active_warnings()`
 - `get_component_code(component_id)` — source from the component's `locations`
+- `get_pending_implementation()` — components that are `planned` or `stale` (the implementation queue)
 
 **Write** (validated; the graph is saved on success)
 - `propose_component(component_id, description, processing, input_types, output_types, z_level, external=False, parent_id=None, locations=None)`
 - `update_component(component_id, fields)` — structural fields are protected
 - `delete_component(component_id)` — refuses if the component still has children
 - `propose_edge(edge_type, from_id, to_id)`
+- `mark_implemented(component_id)` — record that the code matches the current spec version
 - `ignore_warning(warning_id, reason)`
 
 ---

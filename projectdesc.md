@@ -114,6 +114,8 @@ class Edge:
 
 **Serialization stores only authoritative state.** parent_id is the source of truth for the hierarchy, so SCOPE edges are regenerated from it on load rather than written. edges_in/edges_out/children are rebuilt on load. Warnings are recomputed on load; only the *ignore decisions* (id + reason) persist. This keeps the yaml roughly an order of magnitude smaller than serializing every derived field.
 
+**Implementation status is derived, not a manual tag.** Each component stores implemented_version (the version its code was last written against). status falls out: planned (None), implemented (== version), stale (< version). Because update_component bumps version, editing a spec auto-flips its code to stale -- the "changed" signal can never drift out of sync. mark_implemented() advances the marker; it is the bridge between graph (spec) and code (implementation).
+
 **Store is pure operations, no validation.** writer.py gates all writes through validator.py. store.py just does the mechanical work.
 
 **Warnings are non-blocking; only ignore decisions persist.** Every warning includes enough context to decide whether to ignore it. Warnings themselves are derived (recomputed each run); the persisted ignore decisions are re-applied by id so the LLM doesn't re-surface dismissed warnings across sessions.
@@ -132,41 +134,49 @@ locations field on Component is optional and empty by default. high level compon
 
 The LLM never gets the whole graph. It navigates via tool calls.
 
-**Graph tools:**
-- new_graph() -- creates a fresh empty graph, stores it, returns confirmation. entry point for authoring mode.
-- get_graph_stats() -- component count, edge count, max z_level, active warnings count. orientation tool.
+**Workspace / graph tools:**
+- list_graphs() -- every named graph, path, component count, which is active.
+- new_graph(name, path, overwrite) -- create a named graph (central by default, or at a repo path). entry point for authoring mode.
+- open_graph(name) -- make an existing graph active. entry point for editing/implementing.
+- get_graph_stats() -- name, paths, component/edge counts, max z_level, by_status counts, active warnings count. orientation tool.
 
 **Read tools:**
 - get_component(id)
+- get_work_context(id) -- the 1-hop frame for safely writing or implementing one node (own contract, receives, must_produce, parent contract, children, references, current code, its warnings). call before every write.
 - get_neighbors(id, edge_type, upstream)
 - get_references(id, incoming) -- weak REFERENCE links only, separate from FLOW/SCOPE traversal
 - search_components(query) -- semantic search over descriptions
 - get_subgraph(id, depth)
 - get_path(from_id, to_id)
 - get_impact(id)
-- get_active_warnings()
+- get_active_warnings() -- compact {id, type, affected} + a per-type legend
 - get_component_code(id) -- reads actual file at component's location, returns source. requires locations to be set.
+- get_pending_implementation() -- components that are planned or stale (the implementation queue), stale/leaves first.
 
 **Write tools (all validated before commit):**
 - propose_component(component)
 - update_component(id, fields)
 - delete_component(id)
 - propose_edge(edge)
+- mark_implemented(id) -- record that the code matches the current spec version.
 - ignore_warning(warning_id, reason)
 
-**Two modes, same tools, different system prompts:**
+**Three modes, same tools, different system prompts (each also an MCP prompt / slash command):**
 
 AUTHORING MODE -- graph does not exist yet:
 "Call new_graph() first. Define all z=0 components and their edges before decomposing anything. Do not go deeper until the top level is complete and validated. Work top-down one level at a time. Context wipe between levels is expected -- fetch the component you are decomposing first to re-orient."
 
 EDITING MODE -- graph already exists:
-"Fetch the relevant subgraph before touching anything. Make only changes within the scope of the current task. Orient, plan, write, verify. Repeat until done."
+"open_graph(), fetch the relevant subgraph before touching anything. Make only changes within the scope of the current task. Orient, plan, write, verify. Editing a spec bumps version and flips status to stale."
 
-**LLM execution protocol (applies to both modes):**
-1. ORIENT -- fetch relevant subgraph before touching anything
+IMPLEMENTING MODE -- turn the graph into code:
+"open_graph(), get_pending_implementation() for planned/stale components. For each: get_work_context(id), write the code to honor the contract with your own editor tools, set locations, then mark_implemented(id)."
+
+**LLM execution protocol (all modes):**
+1. ORIENT -- call get_work_context(id) for the exact node before touching it; re-pull per change, never write from session memory.
 2. PLAN -- reason about what needs to change
-3. WRITE -- propose one component at a time
-4. VERIFY -- re-fetch what was written, confirm edges are clean
+3. WRITE -- propose / implement one component at a time
+4. VERIFY -- re-fetch what was written, confirm edges and warnings are clean
 5. REPEAT until done
 
 ---

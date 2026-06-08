@@ -71,6 +71,7 @@ from graph_warnings import (
 )
 from writer import (
     delete_component as _delete_component,
+    mark_implemented as _mark_implemented,
     propose_component as _propose_component,
     propose_edge as _propose_edge,
     update_component as _update_component,
@@ -180,6 +181,17 @@ def _loc_dict(loc: FileLocation) -> dict:
     return {"path": loc.path, "start_line": loc.start_line, "end_line": loc.end_line}
 
 
+def _status(c: Component) -> str:
+    """Implementation status, derived from version vs implemented_version:
+    'planned' (no code yet), 'implemented' (code matches spec), or 'stale' (spec
+    was edited after the code was written, so the code needs updating)."""
+    if c.implemented_version is None:
+        return "planned"
+    if c.implemented_version == c.version:
+        return "implemented"
+    return "stale"
+
+
 def _comp_dict(c: Component) -> dict:
     return {
         "component_id": c.component_id,
@@ -194,6 +206,7 @@ def _comp_dict(c: Component) -> dict:
         "children": c.children,
         "parent_id": c.parent_id,
         "version": c.version,
+        "status": _status(c),
         "locations": [_loc_dict(loc) for loc in c.locations],
     }
 
@@ -309,6 +322,9 @@ def get_graph_stats() -> dict:
     GRAPH.warnings = run_all_warnings(GRAPH)
     save_graph(GRAPH, _active_path())
     max_z = max((c.z_level for c in GRAPH.components.values()), default=0)
+    by_status = {"planned": 0, "implemented": 0, "stale": 0}
+    for c in GRAPH.components.values():
+        by_status[_status(c)] += 1
     return {
         "name": ACTIVE,
         "graph_path": _active_path(),
@@ -316,6 +332,7 @@ def get_graph_stats() -> dict:
         "components": len(GRAPH.components),
         "edges": len(GRAPH.edges),
         "max_z_level": max_z,
+        "by_status": by_status,
         "active_warnings": len(_active_warnings(GRAPH.warnings)),
     }
 
@@ -514,6 +531,112 @@ def get_component_code(component_id: str) -> dict:
     return {"locations": out}
 
 
+@mcp.tool()
+def get_work_context(component_id: str) -> dict:
+    """The minimal local context needed to safely write or change ONE component --
+    call this IMMEDIATELY BEFORE every propose_component / update_component on a
+    component, and before implementing its code. Re-pull it each time rather than
+    relying on context from earlier in the session; the graph (and your own prior
+    writes) may have moved.
+
+    It is bounded to the component's 1-hop frame -- not the whole graph -- so it
+    stays cheap. Returns:
+      component     -- this node's own contract (types, processing, status, locations)
+      receives      -- {upstream_id: output_types} it consumes via FLOW
+      must_produce  -- {downstream_id: input_types} its output must satisfy
+      parent        -- the parent contract this node helps cover (or null)
+      children      -- {child_id: {input_types, output_types, status}} if decomposed
+      references    -- weak REFERENCE links (cross-boundary hints)
+      code          -- current source at its locations (or null)
+      warnings      -- active warnings on this exact node
+    """
+    if GRAPH is None:
+        return _no_active()
+    c, err = _fetch(component_id)
+    if err:
+        return err
+    receives = {
+        n.component_id: n.output_types
+        for n in _neighbors(GRAPH, component_id, EdgeType.FLOW, upstream=True)
+    }
+    must_produce = {
+        n.component_id: n.input_types
+        for n in _neighbors(GRAPH, component_id, EdgeType.FLOW, upstream=False)
+    }
+    parent = None
+    if c.parent_id:
+        p = _get_component(GRAPH, c.parent_id)
+        parent = {
+            "component_id": p.component_id,
+            "input_types": p.input_types,
+            "output_types": p.output_types,
+        }
+    children = {}
+    for ch in c.children:
+        cc = _get_component(GRAPH, ch)
+        children[ch] = {
+            "input_types": cc.input_types,
+            "output_types": cc.output_types,
+            "status": _status(cc),
+        }
+    code = get_component_code(component_id).get("locations") if c.locations else None
+    GRAPH.warnings = run_all_warnings(GRAPH)
+    warns = [
+        {"id": w.id, "warning_type": w.warning_type, "affected": w.affected}
+        for w in _active_warnings(GRAPH.warnings)
+        if w.id.endswith(f"__{component_id}") or component_id in w.affected
+    ]
+    return {
+        "component": {
+            "component_id": c.component_id,
+            "description": c.description,
+            "processing": c.processing,
+            "input_types": c.input_types,
+            "output_types": c.output_types,
+            "z_level": c.z_level,
+            "external": c.external,
+            "status": _status(c),
+            "version": c.version,
+            "locations": [_loc_dict(loc) for loc in c.locations],
+        },
+        "receives": receives,
+        "must_produce": must_produce,
+        "parent": parent,
+        "children": children,
+        "references": [n.component_id for n in _references(GRAPH, component_id)],
+        "code": code,
+        "warnings": warns,
+    }
+
+
+@mcp.tool()
+def get_pending_implementation() -> dict:
+    """Components whose code does not match the graph: 'planned' (never built) or
+    'stale' (spec edited since the code was last written). This is the work queue
+    for IMPLEMENTATION MODE. External (atomic boundary) nodes are excluded -- they
+    are not ours to implement.
+
+    Sorted stale-first, then leaves-first, then shallowest. Returns
+    {"pending": [{component_id, status, z_level, is_leaf, locations}], "count"}."""
+    if GRAPH is None:
+        return _no_active()
+    pending = []
+    for c in GRAPH.components.values():
+        st = _status(c)
+        if st in ("planned", "stale") and not c.external:
+            pending.append(
+                {
+                    "component_id": c.component_id,
+                    "status": st,
+                    "z_level": c.z_level,
+                    "is_leaf": not c.children,
+                    "locations": [_loc_dict(loc) for loc in c.locations],
+                }
+            )
+    pending.sort(key=lambda p: (p["status"] != "stale", not p["is_leaf"], p["z_level"]))
+    return {"pending": pending, "count": len(pending)}
+
+
 # ===========================================================================
 # Write tools (all validated before commit; the graph is saved on success)
 # ===========================================================================
@@ -679,6 +802,91 @@ def ignore_warning(warning_id: str, reason: str) -> dict:
         return {"ok": False, "error": f"Warning '{warning_id}' not found among active warnings."}
     save_graph(GRAPH, _active_path())
     return {"ok": True, "ignored": warning_id}
+
+
+@mcp.tool()
+def mark_implemented(component_id: str) -> dict:
+    """Record that this component's code has been written to match its CURRENT spec
+    version. Use it in implementation mode after you have written/updated the code
+    and set its locations. It advances the component from 'planned'/'stale' to
+    'implemented' without changing the spec. Any later edit to the component bumps
+    its version and it reads as 'stale' again.
+
+    Returns {"ok": True, "component_id", "status"} or {"error": ...}."""
+    if GRAPH is None:
+        return _no_active()
+    c, err = _fetch(component_id)
+    if err:
+        return err
+    _mark_implemented(GRAPH, component_id)
+    save_graph(GRAPH, _active_path())
+    return {"ok": True, "component_id": component_id, "status": _status(c)}
+
+
+# ===========================================================================
+# Mode prompts -- surface as slash commands; load the right discipline per task
+# ===========================================================================
+_WRITE_DISCIPLINE = (
+    "Discipline for every write: before you propose or edit ANY component, call "
+    "get_work_context(id) for that exact component and read it. Never write from "
+    "memory or from context fetched earlier in the session -- the graph changes, "
+    "including from your own prior writes. Orient, write, verify, one component at a time."
+)
+
+
+@mcp.prompt()
+def armature_author() -> str:
+    """Authoring mode: model a brand-new system from scratch as a graph."""
+    return (
+        "You are AUTHORING a new system in Armature.\n\n"
+        "1. list_graphs() to see what exists; new_graph(name) to begin. If it already "
+        "exists you are editing, not authoring -- use the edit flow instead.\n"
+        "2. Define ALL z=0 components and their FLOW edges first. Do not decompose until "
+        "the top level is complete and you understand its warnings.\n"
+        "3. Decompose top-down, one level at a time. A context wipe between levels is "
+        "expected: re-fetch the component you are decomposing to re-orient.\n"
+        "4. Entry children must cover the parent's input types and exit children its "
+        "output types. Use REFERENCE edges only for weak cross-boundary links.\n\n"
+        + _WRITE_DISCIPLINE
+    )
+
+
+@mcp.prompt()
+def armature_edit() -> str:
+    """Editing mode: make scoped changes to an existing system's graph."""
+    return (
+        "You are EDITING an existing system in Armature.\n\n"
+        "1. list_graphs(), then open_graph(name) for the system you are changing.\n"
+        "2. get_subgraph and get_impact before touching anything -- understand the "
+        "blast radius first.\n"
+        "3. Make ONLY changes within the scope of the task. After each write, look at the "
+        "returned warning count and call get_active_warnings if it is nonzero.\n"
+        "4. Editing a component's spec bumps its version and flips it to 'stale': its "
+        "code now needs re-implementation. That is expected -- surface it, do not hide it.\n\n"
+        + _WRITE_DISCIPLINE
+    )
+
+
+@mcp.prompt()
+def armature_implement() -> str:
+    """Implementation mode: turn the graph's spec into working code."""
+    return (
+        "You are IMPLEMENTING the system's code to match its Armature graph. The graph "
+        "is the spec; make the code agree with it.\n\n"
+        "1. open_graph(name), then get_pending_implementation() to see what is 'planned' "
+        "(never built) or 'stale' (spec changed since it was built). Take stale "
+        "regressions and leaf components first.\n"
+        "2. For EACH component: call get_work_context(id) first. It gives the contract "
+        "(input/output types), what it receives upstream, what it must produce "
+        "downstream, the parent contract to satisfy, and the current code at its "
+        "locations.\n"
+        "3. Write or update the code with your own editor/file tools so it honors that "
+        "contract. If locations are missing or have moved, set them with "
+        "update_component.\n"
+        "4. Call mark_implemented(id) once the code matches the current spec version, "
+        "then move on. Re-run get_pending_implementation to track what is left.\n\n"
+        + _WRITE_DISCIPLINE
+    )
 
 
 if __name__ == "__main__":

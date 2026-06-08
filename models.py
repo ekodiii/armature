@@ -44,6 +44,9 @@ class Component:
 
     # bumped on every validated update — optimistic concurrency primitive
     version: int = 0
+    # the `version` whose spec the code was last implemented against.
+    # None = never implemented. < version = spec changed since, code is stale.
+    implemented_version: Optional[int] = None
 
 
 # Warnings
