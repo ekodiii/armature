@@ -21,6 +21,9 @@ def save_graph(graph: Graph, path: str):
                 "parent_id": c.parent_id,
                 "version": c.version,
                 "implemented_version": c.implemented_version,
+                "implemented_sha": c.implemented_sha,
+                # only persist drift when set — keeps the common case clean
+                **({"code_drifted": True} if c.code_drifted else {}),
                 "locations": [
                     {
                         "path": loc.path,
@@ -46,6 +49,7 @@ def save_graph(graph: Graph, path: str):
             for w in graph.warnings
             if w.ignored
         ],
+        "last_synced_sha": graph.last_synced_sha,
     }
     with open(path, "w") as f:
         yaml.dump(data, f, sort_keys=False)
@@ -71,6 +75,8 @@ def load_graph(path: str) -> Graph:
             parent_id=c_data.get("parent_id"),
             version=c_data.get("version", 0),
             implemented_version=c_data.get("implemented_version"),
+            implemented_sha=c_data.get("implemented_sha"),
+            code_drifted=c_data.get("code_drifted", False),
             locations=[
                 FileLocation(
                     path=loc["path"],
@@ -81,10 +87,18 @@ def load_graph(path: str) -> Graph:
             ],
         )
 
-    # Rebuild the hierarchy (children lists + SCOPE edges) from parent_id.
+    # Rebuild the hierarchy (children lists + SCOPE edges) from parent_id. The
+    # YAML is advertised as human-editable, so a dangling reference is a likely
+    # hand-edit mistake: fail with a message that names the offender rather than
+    # a bare KeyError traceback.
     for component in graph.components.values():
         if component.parent_id is not None:
-            parent = graph.components[component.parent_id]
+            parent = graph.components.get(component.parent_id)
+            if parent is None:
+                raise ValueError(
+                    f"Component '{component.component_id}' names a parent "
+                    f"'{component.parent_id}' that does not exist in the graph."
+                )
             parent.children.append(component.component_id)
             scope = Edge(EdgeType.SCOPE, component.parent_id, component.component_id)
             graph.edges[scope.edge_id] = scope
@@ -101,6 +115,11 @@ def load_graph(path: str) -> Graph:
             from_id=e_data["from_id"],
             to_id=e_data["to_id"],
         )
+        if edge.from_id not in graph.components or edge.to_id not in graph.components:
+            raise ValueError(
+                f"Edge '{e_data['edge_type']}' references a component that does "
+                f"not exist: {edge.from_id} -> {edge.to_id}."
+            )
         graph.edges[edge.edge_id] = edge
         graph.components[edge.from_id].edges_out.append(edge.edge_id)
         graph.components[edge.to_id].edges_in.append(edge.edge_id)
@@ -119,4 +138,5 @@ def load_graph(path: str) -> Graph:
             ignore_reason=w_data.get("ignore_reason"),
         ))
 
+    graph.last_synced_sha = data.get("last_synced_sha")
     return graph

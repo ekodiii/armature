@@ -15,6 +15,13 @@ def check_hanging_outputs(graph: Graph) -> list[Warning]:
             if edge.edge_type == EdgeType.FLOW:
                 for t in get_component(graph, edge.to_id).input_types:
                     consumed.add(t)
+        # A child's output that matches a type its parent declares is not
+        # hanging — it flows up through the parent's boundary (FLOW is
+        # sibling-only, so that consumption is invisible at this level).
+        # Without this exemption every exit node warns, which pressures
+        # authors to invent fictional sibling edges just to silence it.
+        if component.parent_id is not None:
+            consumed |= set(get_component(graph, component.parent_id).output_types)
         hanging = [t for t in component.output_types if t not in consumed]
         if hanging:
             result.append(Warning(
@@ -89,8 +96,12 @@ def check_flow_cycles(graph: Graph) -> list[Warning]:
     cycle = detect_cycles(graph, EdgeType.FLOW)
     if not cycle:
         return []
+    # Identify the warning by the cycle's members (order-independent) so ignoring
+    # one intentional feedback loop does not also silence a different, accidental
+    # cycle elsewhere in the graph.
+    cycle_key = "_".join(sorted(set(cycle)))
     return [Warning(
-        id="flow_cycle",
+        id=f"flow_cycle__{cycle_key}",
         warning_type="flow_cycle",
         message=(
             "A cycle was detected in the FLOW graph. This may be a legitimate feedback "

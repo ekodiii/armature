@@ -1,0 +1,2082 @@
+components:
+  llm-operator:
+    component_id: llm-operator
+    description: External LLM agent (Claude or similar) that drives the armature server
+      by calling MCP tools to plan, query, and implement graph-modeled systems.
+    processing: Issues MCP tool calls representing planning intent, query requests,
+      authoring mutations, and translation commands.
+    input_types:
+    - UserIntent
+    output_types:
+    - McpToolCall
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    implemented_version: null
+    implemented_sha: null
+    locations: []
+  mcp-dispatch:
+    component_id: mcp-dispatch
+    description: "MCP tool dispatch surface (server.py) \u2014 the FastMCP entry point\
+      \ that routes every incoming tool call to graph-core subsystems and serializes\
+      \ responses."
+    processing: Receives MCP tool calls, validates active-graph state, delegates to
+      graph-core operations/writer, and returns structured JSON responses. Translation
+      is operator-driven via skeleton tools, not via MCP session tools.
+    input_types:
+    - McpToolCall
+    output_types:
+    - McpToolResponse
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 3
+    implemented_version: 3
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 1
+      end_line: 1269
+  graph-core:
+    component_id: graph-core
+    description: "In-memory graph substrate \u2014 models, store, writer, validator,\
+      \ warnings, operations, and serializer \u2014 that owns all component/edge state\
+      \ and enforces structural integrity."
+    processing: Accepts mutation and query requests, enforces graph invariants, runs
+      warning checks, and persists state to YAML.
+    input_types:
+    - MutationRequest
+    - QueryRequest
+    output_types:
+    - Graph
+    - QueryResult
+    - Warning
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: models.py
+      start_line: 1
+      end_line: 80
+    - path: writer.py
+      start_line: 1
+      end_line: 104
+    - path: validator.py
+      start_line: 1
+      end_line: 218
+    - path: graph_warnings.py
+      start_line: 1
+      end_line: 189
+    - path: operations.py
+      start_line: 1
+      end_line: 104
+    - path: serializer.py
+      start_line: 1
+      end_line: 135
+  translator-pipeline:
+    component_id: translator-pipeline
+    description: "Codebase-to-graph translation pipeline \u2014 source ingestion and\
+      \ skeleton extraction \u2014 producing a CodeSkeleton for the operator to annotate\
+      \ and commit via graph-core tools."
+    processing: Ingests source files and builds a mechanical code skeleton (symbols,
+      imports, call graph, dataflow) that the LLM operator inspects and translates
+      into Armature components via propose_component and propose_edge.
+    input_types:
+    - SourceRoot
+    - TranslateCommand
+    output_types:
+    - VerifiedModel
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/__init__.py
+      start_line: 1
+      end_line: 11
+  filesystem:
+    component_id: filesystem
+    description: "External filesystem \u2014 the source code tree being translated\
+      \ and the YAML graph files being persisted."
+    processing: Stores source files read by ingestion and graph YAML files written
+      by the serializer.
+    input_types:
+    - YamlGraph
+    output_types:
+    - SourceFile
+    - YamlGraph
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    implemented_version: null
+    implemented_sha: null
+    locations: []
+  dispatch-lifecycle:
+    component_id: dispatch-lifecycle
+    description: 'Graph lifecycle and registry handlers: list_graphs, new_graph, open_graph,
+      get_graph_stats. open_graph now returns a clean error on a bad file instead
+      of crashing; new_graph backs up an existing file to .bak before an overwrite;
+      get_graph_stats recomputes warnings in memory without writing the file (reads
+      no longer dirty the graph).'
+    processing: Manages the named-graph registry (load/save/validate), creates empty
+      graphs, switches the active graph, and returns orientation stats.
+    input_types:
+    - McpToolCall
+    output_types:
+    - GraphRegistry
+    - GraphStats
+    z_level: 1
+    external: false
+    parent_id: mcp-dispatch
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 304
+      end_line: 416
+  dispatch-query:
+    component_id: dispatch-query
+    description: Navigation/query handlers + orientation. get_graph_stats and get_pending_implementation
+      now surface the 'drifted' status (code changed in git since verification) alongside
+      planned/stale/implemented.
+    processing: Dispatches read-only queries to operations and store and returns terse-by-default
+      responses (full detail opt-in) shaped for token efficiency; additionally serves
+      a compact whole-graph orient map and an intent->location locate that returns
+      ranked components with their code ranges.
+    input_types:
+    - McpToolCall
+    output_types:
+    - ComponentView
+    - NavigationResult
+    - WorkContext
+    - MapView
+    - LocateResult
+    z_level: 1
+    external: false
+    parent_id: mcp-dispatch
+    version: 3
+    implemented_version: 3
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 402
+      end_line: 812
+  dispatch-authoring:
+    component_id: dispatch-authoring
+    description: "Mutation + reconcile handlers: propose/update/delete_component,\
+      \ propose_edge, mark_implemented (stamps git HEAD), ignore_warning, and reconcile()\
+      \ \u2014 the git-sync drift detector exposed to the operator."
+    processing: Validates and forwards component/edge mutation requests to writer,
+      then re-runs warning checks and returns updated warning counts.
+    input_types:
+    - McpToolCall
+    output_types:
+    - MutationResult
+    - WarningCount
+    z_level: 1
+    external: false
+    parent_id: mcp-dispatch
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 809
+      end_line: 1044
+  dispatch-prompts:
+    component_id: dispatch-prompts
+    description: "Prompt/mode handlers: armature_plan, armature_translate, armature_implement\
+      \ \u2014 return rich contextual system prompts that configure the LLM operator\
+      \ for a specific working mode."
+    processing: Returns mode-specific instruction prompts (plan, translate, implement)
+      that orient the LLM operator with graph state and task-specific guidance.
+    input_types:
+    - McpToolCall
+    output_types:
+    - ModePrompt
+    z_level: 1
+    external: false
+    parent_id: mcp-dispatch
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 1118
+      end_line: 1209
+  dispatch-helpers:
+    component_id: dispatch-helpers
+    description: 'Internal server utilities: registry/workspace helpers (_load/_save_registry,
+      _valid_name, _active_path, _project_root, _set_active, _no_active), persistence
+      (_recompute_warnings recomputes warnings in memory; _persist also saves), and
+      response shaping (_fetch, _parse_edge_type, _loc_dict, _status, _comp_dict,
+      _terse, _active_count). _set_active now invalidates the cached translation skeleton
+      on graph switch; boot is exception-safe.'
+    processing: Provides registry I/O, active-graph resolution, response serialization
+      helpers, and guard checks shared across all dispatch handlers.
+    input_types:
+    - GraphRegistry
+    - Graph
+    output_types:
+    - GraphRegistry
+    - SerializedComponent
+    z_level: 1
+    external: false
+    parent_id: mcp-dispatch
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 107
+      end_line: 297
+  core-models:
+    component_id: core-models
+    description: "Domain data model \u2014 Component (now carries implemented_sha\
+      \ + code_drifted for git drift detection), Edge, Graph (last_synced_sha), Warning,\
+      \ FileLocation, EdgeType."
+    processing: Defines the typed data structures that all other graph-core modules
+      read and write; the single source of truth for graph topology and metadata.
+    input_types:
+    - RawFields
+    output_types:
+    - Component
+    - Edge
+    - Graph
+    - Warning
+    z_level: 1
+    external: false
+    parent_id: graph-core
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: models.py
+      start_line: 1
+      end_line: 91
+  core-store:
+    component_id: core-store
+    description: "In-memory CRUD store \u2014 add/remove/get for components and edges,\
+      \ plus adjacency-index sync (sync_component_fields, sync_edge_fields) that keeps\
+      \ the Graph's lookup dicts consistent."
+    processing: Maintains the Graph's component and edge dictionaries and their adjacency
+      indexes; all mutations pass through here to keep lookups O(1).
+    input_types:
+    - Component
+    - Edge
+    - Graph
+    output_types:
+    - Graph
+    z_level: 1
+    external: false
+    parent_id: graph-core
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: store.py
+      start_line: 1
+      end_line: 74
+  core-writer:
+    component_id: core-writer
+    description: Validated mutation API; mark_implemented now stamps the current git
+      commit (implemented_sha) as the drift baseline and clears code_drifted. Validates
+      ids and the root z_level invariant.
+    processing: Runs validator checks before delegating to store, enforcing structural
+      rules (z-levels, parent relationships, edge constraints) on every write.
+    input_types:
+    - MutationRequest
+    output_types:
+    - Graph
+    - ValidationError
+    z_level: 1
+    external: false
+    parent_id: graph-core
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: writer.py
+      start_line: 1
+      end_line: 112
+  core-validator:
+    component_id: core-validator
+    description: "Structural integrity checker \u2014 validate_edge, validate_component,\
+      \ validate_consistency, validate_input/output_coverage, detect_cycles \u2014\
+      \ guards all mutations and consistency scans. detect_cycles is now an iterative\
+      \ three-colour DFS that returns the full cycle path (not just the re-entry node)\
+      \ and has no recursion-depth limit."
+    processing: Enforces graph structural rules (z-level parity, sibling constraints,
+      cycle detection, port coverage) and returns errors that block invalid writes.
+    input_types:
+    - Component
+    - Edge
+    - Graph
+    output_types:
+    - ValidationError
+    z_level: 1
+    external: false
+    parent_id: graph-core
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: validator.py
+      start_line: 1
+      end_line: 218
+  core-warnings:
+    component_id: core-warnings
+    description: "Warning audit engine \u2014 hanging/starved/coverage/cycles/undefined/orphans\
+      \ \u2014 run after every mutation. flow_cycle ids are per-cycle. hanging_output\
+      \ exempts child outputs that match the parent's declared boundary (prevents\
+      \ the fictional-sibling-edge incentive)."
+    processing: Scans the full graph after each mutation for semantic health issues
+      (unconnected ports, type mismatches, orphans) and produces ignorable Warning
+      records.
+    input_types:
+    - Graph
+    output_types:
+    - Warning
+    z_level: 1
+    external: false
+    parent_id: graph-core
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: graph_warnings.py
+      start_line: 1
+      end_line: 196
+  core-operations:
+    component_id: core-operations
+    description: "Graph traversal and query engine \u2014 get_neighbors, get_references,\
+      \ get_subgraph, get_path, get_impact, _walk_flow \u2014 the read path that computes\
+      \ topology views without mutating state."
+    processing: Executes structural queries over the in-memory Graph (BFS/DFS traversals
+      for neighbors, reachability, shortest paths, impact sets, reference chains)
+      and returns shaped result sets.
+    input_types:
+    - Graph
+    - QueryRequest
+    output_types:
+    - QueryResult
+    z_level: 1
+    external: false
+    parent_id: graph-core
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: operations.py
+      start_line: 1
+      end_line: 104
+  core-serializer:
+    component_id: core-serializer
+    description: "YAML persistence \u2014 save_graph/load_graph; now also persists\
+      \ implemented_sha, code_drifted (when set), and the graph's last_synced_sha;\
+      \ raises clear errors on dangling refs."
+    processing: Serializes the authoritative Graph state to YAML on every persist
+      call, and deserializes YAML back to Graph objects on open_graph.
+    input_types:
+    - Graph
+    - FilePath
+    output_types:
+    - YamlGraph
+    - Graph
+    z_level: 1
+    external: false
+    parent_id: graph-core
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: serializer.py
+      start_line: 1
+      end_line: 142
+  ops-neighbors:
+    component_id: ops-neighbors
+    description: "get_neighbors \u2014 returns direct FLOW or SCOPE sibling neighbors\
+      \ of a component, optionally filtered by edge_type and direction (upstream/downstream)."
+    processing: Looks up adjacency index for a component id, filters edges by type
+      and direction, and returns the adjacent component ids and their metadata.
+    input_types:
+    - Graph
+    - ComponentId
+    - EdgeType
+    - Direction
+    output_types:
+    - NeighborList
+    z_level: 2
+    external: false
+    parent_id: core-operations
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: operations.py
+      start_line: 8
+      end_line: 17
+  ops-references:
+    component_id: ops-references
+    description: "get_references \u2014 returns all REFERENCE-typed edges touching\
+      \ a component, optionally filtering to incoming or outgoing cross-boundary links."
+    processing: Scans the graph's edge index for REFERENCE edges connected to the
+      target component and returns their endpoints and metadata.
+    input_types:
+    - Graph
+    - ComponentId
+    - Direction
+    output_types:
+    - ReferenceList
+    z_level: 2
+    external: false
+    parent_id: core-operations
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: operations.py
+      start_line: 20
+      end_line: 32
+  ops-subgraph:
+    component_id: ops-subgraph
+    description: "get_subgraph \u2014 returns a depth-limited subtree rooted at a\
+      \ component, collecting all SCOPE descendants up to a specified depth."
+    processing: Recursively collects all SCOPE-edge descendants of a root component
+      up to the given depth, returning a flattened list of components and their edges
+      for context.
+    input_types:
+    - Graph
+    - ComponentId
+    - Depth
+    output_types:
+    - SubgraphView
+    z_level: 2
+    external: false
+    parent_id: core-operations
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: operations.py
+      start_line: 35
+      end_line: 53
+  ops-path:
+    component_id: ops-path
+    description: "get_path \u2014 finds the shortest FLOW-edge path between two sibling\
+      \ components using BFS over the sibling adjacency graph."
+    processing: Runs BFS over FLOW edges from a source component to a target, returning
+      the ordered list of component ids forming the shortest path.
+    input_types:
+    - Graph
+    - FromComponentId
+    - ToComponentId
+    output_types:
+    - ComponentPath
+    z_level: 2
+    external: false
+    parent_id: core-operations
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: operations.py
+      start_line: 56
+      end_line: 77
+  ops-impact:
+    component_id: ops-impact
+    description: "get_impact \u2014 returns all components downstream of a given component\
+      \ by walking FLOW edges forward, revealing the full blast radius of a change."
+    processing: Delegates to _walk_flow in the downstream direction from a root component,
+      returning all reachable component ids as the impact set.
+    input_types:
+    - Graph
+    - ComponentId
+    output_types:
+    - ImpactSet
+    z_level: 2
+    external: false
+    parent_id: core-operations
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: operations.py
+      start_line: 80
+      end_line: 84
+  ops-walk-flow:
+    component_id: ops-walk-flow
+    description: "_walk_flow \u2014 shared BFS/DFS traversal kernel used by get_impact\
+      \ and get_path; walks FLOW edges in either direction collecting visited component\
+      \ ids."
+    processing: Iteratively visits FLOW-edge neighbors from a start node in the specified
+      direction, accumulating all reachable component ids without revisiting.
+    input_types:
+    - Graph
+    - ComponentId
+    - Direction
+    output_types:
+    - ComponentIdSet
+    z_level: 2
+    external: false
+    parent_id: core-operations
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: operations.py
+      start_line: 87
+      end_line: 104
+  store-write:
+    component_id: store-write
+    description: "Mutation primitives \u2014 add_component, remove_component, add_edge,\
+      \ remove_edge \u2014 that insert or delete records in the Graph's component\
+      \ and edge dicts."
+    processing: Directly inserts or removes Component and Edge objects from the Graph's
+      primary dictionaries and triggers adjacency index synchronization.
+    input_types:
+    - Component
+    - Edge
+    - Graph
+    output_types:
+    - Graph
+    z_level: 2
+    external: false
+    parent_id: core-store
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: store.py
+      start_line: 5
+      end_line: 38
+  store-read:
+    component_id: store-read
+    description: "Point-lookup primitives \u2014 get_component, get_edge \u2014 that\
+      \ retrieve individual records from the Graph's component and edge dicts by id."
+    processing: Performs O(1) dict lookups by component_id or edge_id and returns
+      the matching record or None if absent.
+    input_types:
+    - Graph
+    - ComponentId
+    output_types:
+    - Component
+    - Edge
+    z_level: 2
+    external: false
+    parent_id: core-store
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: store.py
+      start_line: 21
+      end_line: 45
+  store-index:
+    component_id: store-index
+    description: "Adjacency index synchronization \u2014 sync_component_fields, sync_edge_fields,\
+      \ _detach_edge, _detach_component \u2014 keeps the Graph's adjacency and children\
+      \ lookup structures consistent with the primary dicts."
+    processing: Rebuilds or patches the Graph's adjacency index entries (component.children,
+      edge adjacency lists) whenever a component or edge is added or removed.
+    input_types:
+    - Graph
+    - Component
+    - Edge
+    output_types:
+    - Graph
+    z_level: 2
+    external: false
+    parent_id: core-store
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: store.py
+      start_line: 51
+      end_line: 74
+  query-component-lookup:
+    component_id: query-component-lookup
+    description: "get_component and search_components handlers \u2014 retrieve a single\
+      \ component by id or search by name/type pattern, returning formatted component\
+      \ dicts."
+    processing: Fetches a component by id from store or filters all components by
+      search predicate, then serializes the result using _comp_dict for the LLM response.
+    input_types:
+    - McpToolCall
+    output_types:
+    - ComponentView
+    z_level: 2
+    external: false
+    parent_id: dispatch-query
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 423
+      end_line: 494
+  query-topology:
+    component_id: query-topology
+    description: "get_neighbors, get_references, get_subgraph, get_path, get_impact\
+      \ handlers \u2014 topology navigation returning edge-traversal views for LLM\
+      \ orientation."
+    processing: Delegates to operations module traversal functions and formats the
+      results (neighbor lists, subgraph trees, paths, impact sets) as JSON for the
+      LLM operator.
+    input_types:
+    - McpToolCall
+    output_types:
+    - NavigationResult
+    z_level: 2
+    external: false
+    parent_id: dispatch-query
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 439
+      end_line: 544
+  query-work-context:
+    component_id: query-work-context
+    description: "get_work_context and get_pending_implementation handlers \u2014\
+      \ assemble a scoped LLM working context (component + neighbors + warnings +\
+      \ source), terse-by-default with opt-in field selection. Warning refresh now\
+      \ routes through the in-memory _recompute_warnings helper (no write on read)."
+    processing: Assembles the 1-hop frame (target component + neighbors + warnings
+      + source snippets) and returns it through the response shaper terse-by-default,
+      with field selection so the operator pays only for the fields it requests instead
+      of a fixed dense payload.
+    input_types:
+    - McpToolCall
+    output_types:
+    - WorkContext
+    z_level: 2
+    external: false
+    parent_id: dispatch-query
+    version: 3
+    implemented_version: 3
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 682
+      end_line: 802
+  query-code-warnings:
+    component_id: query-code-warnings
+    description: get_component_code and get_active_warnings handlers. get_component_code
+      now realpath-contains every location under the project root (rejecting '../'
+      / absolute escapes); get_active_warnings recomputes warnings in memory without
+      writing the graph file.
+    processing: Reads source file slices at recorded FileLocation spans and formats
+      them alongside the filtered active warning list for LLM inspection.
+    input_types:
+    - McpToolCall
+    output_types:
+    - SourceSnippet
+    - WarningList
+    z_level: 2
+    external: false
+    parent_id: dispatch-query
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 548
+      end_line: 678
+  trans-ingestion:
+    component_id: trans-ingestion
+    description: "Source ingestion (translator/source_ingestion.py) \u2014 si_dir_walker,\
+      \ si_file_reader, si_language_classifier \u2014 discovers and reads source files\
+      \ respecting .gitignore."
+    processing: Walks the source root, filters out gitignored and non-code paths,
+      classifies files by language, and produces a DispatchedFiles manifest of file
+      records.
+    input_types:
+    - SourceRoot
+    output_types:
+    - DispatchedFiles
+    z_level: 1
+    external: false
+    parent_id: translator-pipeline
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: translator/source_ingestion.py
+      start_line: 1
+      end_line: 110
+  trans-skeleton:
+    component_id: trans-skeleton
+    description: "Mechanical skeleton extractor (translator/skeleton.py) \u2014 build_skeleton\
+      \ and its helpers \u2014 extracts symbols, imports, call edges, and dataflow\
+      \ edges from source ASTs into a CodeSkeleton."
+    processing: Parses source files into ASTs, extracts symbol records with locations
+      and call sites, resolves imports to qualified ids, classifies scope, and assembles
+      a CodeSkeleton with call and dataflow graphs.
+    input_types:
+    - DispatchedFiles
+    output_types:
+    - CodeSkeleton
+    z_level: 1
+    external: false
+    parent_id: translator-pipeline
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/skeleton.py
+      start_line: 1
+      end_line: 736
+  trans-models:
+    component_id: trans-models
+    description: "Translator domain models (translator/models.py) \u2014 RawNode,\
+      \ FileRecord, DispatchedFiles, StructureMap, WriteLog, MigrationReport, GraphDraft\
+      \ \u2014 the data contracts between pipeline stages."
+    processing: Defines the typed dataclasses passed between ingestion, skeleton,
+      annotation, synthesis, and commit stages of the translation pipeline.
+    input_types:
+    - RawFields
+    output_types:
+    - RawNode
+    - GraphDraft
+    - MigrationReport
+    z_level: 1
+    external: false
+    parent_id: translator-pipeline
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: translator/models.py
+      start_line: 1
+      end_line: 73
+  skel-symbol-extractor:
+    component_id: skel-symbol-extractor
+    description: "Symbol extraction \u2014 _extract_symbols_from_file, symbol_extractor,\
+      \ _params_from_args, _return_hint, _raw_call_names, _arg_names_of_call, _build_assign_map,\
+      \ _call_sites_from_func \u2014 parses ASTs to produce SymbolTable records. Assignment\
+      \ targets are now precomputed once per function via _build_assign_map (was the\
+      \ per-call-site _assigned_to_names walk)."
+    processing: Walks Python ASTs for each source file, extracts function/class/module
+      symbol records with their parameters, return hints, call sites, and location
+      spans.
+    input_types:
+    - DispatchedFiles
+    output_types:
+    - SymbolTable
+    z_level: 2
+    external: false
+    parent_id: trans-skeleton
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/skeleton.py
+      start_line: 162
+      end_line: 378
+  skel-import-resolver:
+    component_id: skel-import-resolver
+    description: "Import resolution \u2014 maps imports to source_root-relative files\
+      \ (matching SymbolRecord.path); resolves `from pkg import submodule` to the\
+      \ submodule file; falls back to external boundary modules."
+    processing: Resolves each raw import in the SymbolTable to its absolute file path
+      or marks it as a third-party external, producing a ResolvedImports map used
+      by call-graph building.
+    input_types:
+    - SymbolTable
+    - SourceRoot
+    output_types:
+    - ResolvedImports
+    z_level: 2
+    external: false
+    parent_id: trans-skeleton
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/skeleton.py
+      start_line: 250
+      end_line: 509
+  skel-scope-classifier:
+    component_id: skel-scope-classifier
+    description: "Scope classification \u2014 scope_classifier \u2014 labels each\
+      \ resolved import in-scope (file was actually ingested), first-party-out-of-scope,\
+      \ stdlib (via sys.stdlib_module_names), or third-party, producing ScopedSymbols\
+      \ with the external boundary set. No longer probes the server's own site-packages."
+    processing: Classifies each symbol in the SymbolTable by its nesting depth and
+      parent relationship, producing a ScopedSymbols map that drives z-level assignment
+      in synthesis.
+    input_types:
+    - SymbolTable
+    output_types:
+    - ScopedSymbols
+    z_level: 2
+    external: false
+    parent_id: trans-skeleton
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/skeleton.py
+      start_line: 493
+      end_line: 538
+  skel-call-graph:
+    component_id: skel-call-graph
+    description: "Call graph builder \u2014 _build_name_resolver, call_graph_builder\
+      \ \u2014 resolves each call site to a callee symbol id using real Python name\
+      \ binding (caller-file top-level defs, imported names, then unambiguous method\
+      \ fallback) instead of first-match-by-name, producing a CallGraph of directed\
+      \ call edges."
+    processing: Cross-references call site names against the resolved imports and
+      symbol table to build a directed CallGraph linking caller symbol ids to callee
+      symbol ids.
+    input_types:
+    - SymbolTable
+    - ResolvedImports
+    output_types:
+    - CallGraph
+    z_level: 2
+    external: false
+    parent_id: trans-skeleton
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/skeleton.py
+      start_line: 545
+      end_line: 630
+  skel-dataflow:
+    component_id: skel-dataflow
+    description: "Dataflow extractor \u2014 dataflow_extractor \u2014 tracks values\
+      \ bound to one call's result and consumed as another call's argument, emitting\
+      \ producer\u2192consumer DataflowEdges. Endpoints are resolved through the shared\
+      \ import/scope-aware name resolver (not a last-wins name map)."
+    processing: Analyzes call site argument patterns and assignment targets to produce
+      DataflowEdges capturing which symbols pass data to which callees.
+    input_types:
+    - SymbolTable
+    - CallGraph
+    output_types:
+    - DataflowGraph
+    z_level: 2
+    external: false
+    parent_id: trans-skeleton
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/skeleton.py
+      start_line: 637
+      end_line: 675
+  skel-assembler:
+    component_id: skel-assembler
+    description: "Skeleton assembler \u2014 skeleton_assembler, build_skeleton \u2014\
+      \ combines all extraction outputs into the final CodeSkeleton struct passed\
+      \ to downstream annotation."
+    processing: Joins SymbolTable, ResolvedImports, ScopedSymbols, CallGraph, and
+      DataflowGraph into a single CodeSkeleton record that is the authoritative mechanical
+      anchor for the codebase.
+    input_types:
+    - SymbolTable
+    - ResolvedImports
+    - ScopedSymbols
+    - CallGraph
+    - DataflowGraph
+    output_types:
+    - CodeSkeleton
+    z_level: 2
+    external: false
+    parent_id: trans-skeleton
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/skeleton.py
+      start_line: 682
+      end_line: 713
+  query-response-shaper:
+    component_id: query-response-shaper
+    description: "Terse-by-default response shaper with opt-in field selection \u2014\
+      \ the shared output formatter every read handler routes through, replacing full-dump\
+      \ serialization."
+    processing: Given a raw query result and a VerbositySpec, emits a compact view
+      by default (id + one-line description + types + neighbor/child counts, not full
+      edge-id walls), expanding only explicitly requested fields. This is the core
+      token-efficiency lever for the read path.
+    input_types:
+    - RawQueryResult
+    - VerbositySpec
+    output_types:
+    - ShapedView
+    z_level: 2
+    external: false
+    parent_id: dispatch-query
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 222
+      end_line: 279
+  query-orient:
+    component_id: query-orient
+    description: 'Compact whole-graph orientation map: one cheap call that returns
+      the entire SCOPE tree as an indented id + one-line summary, so the operator
+      grasps the layout without crawling get_subgraph.'
+    processing: 'Walks the SCOPE hierarchy once and emits a terse indented tree (~1
+      token per node: id, one-line description, types) giving whole-system orientation
+      in a single low-cost response.'
+    input_types:
+    - McpToolCall
+    output_types:
+    - MapView
+    z_level: 2
+    external: false
+    parent_id: dispatch-query
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 576
+      end_line: 606
+  query-locate:
+    component_id: query-locate
+    description: "Intent-to-location router: given a keyword/question, returns the\
+      \ few most relevant components ranked, each WITH its exact code range \u2014\
+      \ collapsing graph\u2192small-read into ~2 hops."
+    processing: Ranks components by relevance to a query (id/description/processing
+      match plus structural proximity) and returns the top-k with their anchor locations,
+      so the operator reads only the precise lines that matter instead of broad grepping.
+    input_types:
+    - McpToolCall
+    output_types:
+    - LocateResult
+    z_level: 2
+    external: false
+    parent_id: dispatch-query
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 610
+      end_line: 633
+  ops-rank:
+    component_id: ops-rank
+    description: "Relevance ranking kernel over components \u2014 scores and orders\
+      \ components against a query for the locate primitive. Pure read, no mutation."
+    processing: Scores each component by relevance to a query (id/description/processing
+      match plus structural proximity in the graph) and returns the top-k component
+      ids with scores; the ranking primitive behind query-locate.
+    input_types:
+    - Graph
+    - QueryRequest
+    output_types:
+    - RankedComponents
+    z_level: 2
+    external: false
+    parent_id: core-operations
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: operations.py
+      start_line: 8
+      end_line: 50
+  trans-verify:
+    component_id: trans-verify
+    description: "Structural FIDELITY stage (not semantic proof): validates a graph\
+      \ against the CodeSkeleton on anchors, symbol coverage, type-string contract\
+      \ chaining, and FLOW/REFERENCE grounding, aggregating a trust score. Confirms\
+      \ the design faithfully maps the code's structure; it does NOT prove the code\
+      \ computes the right thing \u2014 that is verification-router's job."
+    processing: Runs five sequential checkers (location-anchor, coverage, contract,
+      flow-grounding, reconciler) threading VerificationState through each pass, consuming
+      SemanticModel and CodeSkeleton, and producing a VerifiedModel with all findings
+      attached.
+    input_types:
+    - SemanticModel
+    - CodeSkeleton
+    output_types:
+    - VerifiedModel
+    z_level: 1
+    external: false
+    parent_id: translator-pipeline
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/verify.py
+      start_line: 1
+      end_line: 609
+  verify-location-anchor:
+    component_id: verify-location-anchor
+    description: Checks that every SemanticModel node has at least one valid CodeSkeleton
+      anchor (symbol id or file location).
+    processing: Iterates SemanticModel nodes, looks each up in the CodeSkeleton symbol
+      table, records missing or mismatched anchors into VerificationState.
+    input_types:
+    - SemanticModel
+    - CodeSkeleton
+    output_types:
+    - VerificationState
+    z_level: 2
+    external: false
+    parent_id: trans-verify
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/verify.py
+      start_line: 132
+      end_line: 199
+  verify-coverage:
+    component_id: verify-coverage
+    description: Checks that every symbol in the CodeSkeleton is covered by at least
+      one SemanticModel component.
+    processing: Walks the CodeSkeleton symbol table and flags any symbol id not referenced
+      by any SemanticModel node's locations, appending coverage gaps to VerificationState.
+    input_types:
+    - VerificationState
+    output_types:
+    - VerificationState
+    z_level: 2
+    external: false
+    parent_id: trans-verify
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/verify.py
+      start_line: 206
+      end_line: 301
+  verify-contract:
+    component_id: verify-contract
+    description: Checks that input/output type contracts declared on SemanticModel
+      nodes are consistent with the CodeSkeleton's parameter and return-hint records.
+    processing: Compares each SemanticModel node's declared input/output types against
+      the CodeSkeleton symbol's parameter annotations and return hints, appending
+      contract violations to VerificationState.
+    input_types:
+    - VerificationState
+    output_types:
+    - VerificationState
+    z_level: 2
+    external: false
+    parent_id: trans-verify
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/verify.py
+      start_line: 308
+      end_line: 361
+  verify-flow-grounding:
+    component_id: verify-flow-grounding
+    description: Checks that every FLOW/REFERENCE edge in the SemanticModel has a
+      backing call/dataflow/import link in the CodeSkeleton. Findings carry a kind
+      ('unverifiable' when neither endpoint is anchored, 'ungrounded' when both are
+      anchored but unlinked) so scoring need not parse the detail string.
+    processing: For each FLOW edge in the SemanticModel, looks up the pair of anchored
+      symbol ids in the CodeSkeleton call graph and dataflow graph; records ungrounded
+      edges into VerificationState.
+    input_types:
+    - VerificationState
+    output_types:
+    - VerificationState
+    z_level: 2
+    external: false
+    parent_id: trans-verify
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/verify.py
+      start_line: 368
+      end_line: 492
+  verify-reconciler:
+    component_id: verify-reconciler
+    description: "Aggregates all VerificationState findings into a VerifiedModel with\
+      \ a weighted trust score. The grounding sub-score now counts only ungrounded\
+      \ findings against the verifiable-edge denominator (unverifiable edges excluded\
+      \ from both), and is clamped to [0,1] \u2014 fixing the prior double-count that\
+      \ could go negative."
+    processing: Collects anchor, coverage, contract, and flow-grounding findings from
+      VerificationState, classifies them as errors/warnings/info, and emits a VerifiedModel
+      with the original SemanticModel plus the structured findings report.
+    input_types:
+    - VerificationState
+    output_types:
+    - VerifiedModel
+    z_level: 2
+    external: false
+    parent_id: trans-verify
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/verify.py
+      start_line: 499
+      end_line: 609
+  trans-lifter:
+    component_id: trans-lifter
+    description: "Operator-driven semantic lift stage (planned) \u2014 elevates a\
+      \ CodeSkeleton into a SemanticModel by grouping anchored symbols into responsibility-driven\
+      \ components with named contracts, completed edges, and intent descriptions."
+    processing: "Runs five sequential lift passes (abstraction-planner, contract-recoverer,\
+      \ flow-completer, intent-describer, consolidator) threading intermediate representations\
+      \ from CodeSkeleton to SemanticModel. Not yet implemented \u2014 operator-driven\
+      \ lift is the planned roadmap step between skeleton extraction and verification."
+    input_types:
+    - CodeSkeleton
+    output_types:
+    - SemanticModel
+    z_level: 1
+    external: false
+    parent_id: translator-pipeline
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/lift.py
+      start_line: 1
+      end_line: 768
+  lift-abstraction-planner:
+    component_id: lift-abstraction-planner
+    description: Groups anchored symbols by responsibility into candidate components.
+      Now uses Leiden community detection (leidenalg) over the weighted call+dataflow
+      coupling graph (dataflow edges weighted 2x calls) instead of connected components,
+      which fused unrelated responsibilities into one blob. Resolution parameter tunes
+      granularity. Evidence, not verdict.
+    processing: "Operator-driven. Clusters the region's anchored symbols by concept/responsibility,\
+      \ not by caller \u2014 a node may span many functions or carve one function\
+      \ into separate concerns; explicitly avoids 1:1 function->node mirroring. Consumes\
+      \ the RegionSkeleton worksheet (module clusters, entrypoints, fan-in hubs, pure\
+      \ leaves) computed mechanically as grouping evidence."
+    input_types:
+    - RegionSkeleton
+    output_types:
+    - AbstractionHierarchy
+    z_level: 2
+    external: false
+    parent_id: trans-lifter
+    version: 3
+    implemented_version: 3
+    implemented_sha: null
+    locations:
+    - path: translator/lift.py
+      start_line: 185
+      end_line: 295
+  lift-contract-recoverer:
+    component_id: lift-contract-recoverer
+    description: Recovers named data contracts the code erased and unifies type names
+      across the AbstractionHierarchy to produce a TypedHierarchy.
+    processing: Infers input/output type names for each abstract component by analyzing
+      parameter annotations, return hints, and docstrings in the CodeSkeleton; unifies
+      synonymous type names into a TypedHierarchy.
+    input_types:
+    - AbstractionHierarchy
+    output_types:
+    - TypedHierarchy
+    z_level: 2
+    external: false
+    parent_id: trans-lifter
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/lift.py
+      start_line: 264
+      end_line: 330
+  lift-flow-completer:
+    component_id: lift-flow-completer
+    description: "Surfaces candidate FLOW/REFERENCE edges for the operator to confirm\
+      \ \u2014 producer\u2192consumer pairs the skeleton can see, plus blind-spot\
+      \ flags for mutation/accumulation flows it cannot. It proposes candidates; the\
+      \ operator wires the actual edges."
+    processing: "flow_completer(region) -> list[FlowCandidate]. Emits dataflow-derived\
+      \ producer\u2192consumer candidates (kind='dataflow', strongest signal) and\
+      \ call-derived caller\u2192callee candidates (kind='call', weaker, often control\
+      \ not data). Blind-spot flags are returned in the SAME list as FlowCandidate\
+      \ entries with blind_spot=True and to_symbol=None, narrowed to genuine hidden\
+      \ flows: an in-place container mutation (append/extend/add/update/...) whose\
+      \ argument is a function parameter or a value produced by a prior call in the\
+      \ same function \u2014 the cases static def-use analysis misses and the operator\
+      \ must wire by hand."
+    input_types:
+    - TypedHierarchy
+    output_types:
+    - WiredHierarchy
+    z_level: 2
+    external: false
+    parent_id: trans-lifter
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/lift.py
+      start_line: 338
+      end_line: 428
+  lift-intent-describer:
+    component_id: lift-intent-describer
+    description: "Thin, operator-driven describe helper: given a region and one symbol_id,\
+      \ assembles the evidence (source snippet + signature + call neighbours) the\
+      \ operator needs to write that node's what/why. It does NOT auto-generate descriptions\
+      \ \u2014 the operator authors the prose; this surfaces context only."
+    processing: 'intent_describer(region, symbol_id) -> DescribeContext: looks up
+      the symbol in the RegionSkeleton, reads its source snippet via region.source_root,
+      and collects its in-region callers/callees (id, name) from the region call edges.
+      Returns a DescribeContext (symbol_id, name, kind, path, line range, signature,
+      snippet, callers, callees). No LLM call and no description text is produced
+      here; it is the per-symbol assist that lets the operator fill in description/processing
+      fields toward the DescribedModel.'
+    input_types:
+    - WiredHierarchy
+    output_types:
+    - DescribedModel
+    z_level: 2
+    external: false
+    parent_id: trans-lifter
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/lift.py
+      start_line: 436
+      end_line: 485
+  lift-consolidator:
+    component_id: lift-consolidator
+    description: 'Right-sizes granularity for the authored region: merges call-tree-residue
+      nodes into higher-level components or keeps function-level nodes that genuinely
+      aid understanding; emits the finished RegionModel for coverage tracking.'
+    processing: "Operator-driven review of the region's described model: collapses\
+      \ nodes that merely mirror the call tree (no contract gain) into higher-level\
+      \ components, keeps function-level nodes that materially help comprehension,\
+      \ and emits the RegionModel \u2014 one region's contribution to the full SemanticModel."
+    input_types:
+    - DescribedModel
+    output_types:
+    - RegionModel
+    z_level: 2
+    external: false
+    parent_id: trans-lifter
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/lift.py
+      start_line: 539
+      end_line: 562
+  lift-scope-slicer:
+    component_id: lift-scope-slicer
+    description: Slices the whole-codebase CodeSkeleton to one region (subdir or symbol
+      set) so each lift session fits a fresh context; out-of-region symbols are summarized
+      as boundary contracts only. scope=everything degenerates to the small-codebase
+      single pass.
+    processing: Given a CodeSkeleton and an operator-chosen ScopeSpec (None=whole
+      codebase, a path-prefix string, or an explicit symbol-id set), emits a RegionSkeleton
+      with full detail for in-region symbols and terse boundary stubs (id, signature,
+      file) for out-of-region symbols referenced by in-region code, plus intra-region
+      vs boundary call edges and intra-region dataflow edges. Takes an optional source_root
+      (default '.') threaded onto the RegionSkeleton so later passes (e.g. intent-describer)
+      can read per-symbol source. The unit of work for one operator session in the
+      recursive large-codebase protocol.
+    input_types:
+    - CodeSkeleton
+    - ScopeSpec
+    output_types:
+    - RegionSkeleton
+    z_level: 2
+    external: false
+    parent_id: trans-lifter
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/lift.py
+      start_line: 79
+      end_line: 177
+  lift-coverage-tracker:
+    component_id: lift-coverage-tracker
+    description: "The resume/progress mechanism: reports which skeleton symbols are\
+      \ not yet covered by any authored node, grouped by module \u2014 so translation\
+      \ can cut off anywhere and the next session queries where to continue. The graph\
+      \ is the memory between context wipes."
+    processing: After a region lands, compares the authored graph's anchors against
+      the full CodeSkeleton (reusing verify's coverage logic) and emits a CoverageReport
+      of uncovered symbols by module; an empty report signals all regions done. Drives
+      the next-region loop back to the scope slicer.
+    input_types:
+    - RegionModel
+    output_types:
+    - CoverageReport
+    z_level: 2
+    external: false
+    parent_id: trans-lifter
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: translator/lift.py
+      start_line: 570
+      end_line: 602
+  lift-stitch-reconciler:
+    component_id: lift-stitch-reconciler
+    description: 'Final stitching pass: surfaces cross-subtree call/dataflow edges
+      from the skeleton whose relationship the graph does not already model (filtered
+      against existing FLOW/REFERENCE edges between the endpoints'' components OR
+      any of their ancestors), grouped per component pair with an occurrence count,
+      for operator confirmation as REFERENCE/FLOW.'
+    processing: When the CoverageReport is empty, mechanically computes stitch candidates
+      (skeleton call/dataflow edges crossing region boundaries, keyed by the anchored
+      nodes at each end), the operator confirms or rejects each, and the completed
+      SemanticModel is emitted for verification.
+    input_types:
+    - CoverageReport
+    output_types:
+    - SemanticModel
+    z_level: 2
+    external: false
+    parent_id: trans-lifter
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: translator/lift.py
+      start_line: 649
+      end_line: 738
+  dispatch-translate:
+    component_id: dispatch-translate
+    description: "Translation orchestration tool surface (planned) \u2014 the MCP\
+      \ entry point that kicks off and steps an operator-driven translation, replacing\
+      \ the deleted translate_* batch tools. Wraps the lift drivers and verify so\
+      \ the operator runs the recursive region loop from within a session."
+    processing: "Exposes four thin tools over translator/lift.py + verify.py, all\
+      \ operating on the active graph being authored: translate_prepare(source_root,\
+      \ scope=None) \u2192 caches the skeleton and returns the LiftContext worksheet\
+      \ for a region; translate_coverage() \u2192 CoverageReport of uncovered symbols\
+      \ (the resume/progress query); translate_stitch() \u2192 cross-region edge candidates\
+      \ once coverage is empty; translate_verify() \u2192 runs verify on the active\
+      \ graph. The semantic authoring between calls is done by the operator via propose_component/propose_edge."
+    input_types:
+    - McpToolCall
+    output_types:
+    - TranslateResult
+    z_level: 1
+    external: false
+    parent_id: mcp-dispatch
+    version: 2
+    implemented_version: 2
+    implemented_sha: null
+    locations:
+    - path: server.py
+      start_line: 996
+      end_line: 1103
+  test-suite:
+    component_id: test-suite
+    description: "Pytest regression suite (tests/) exercising the graph engine and\
+      \ translator. 57 tests across test_graph_core, test_serializer, test_warnings,\
+      \ test_translator_skeleton, test_translator_verify \u2014 each bug fixed in\
+      \ the hardening pass has a named regression test. Run via `uv run pytest`."
+    processing: 'Imports the flat modules (pythonpath=src), builds synthetic graphs
+      and source trees, and asserts behavior: id/structural validation, cycle detection,
+      save/load round-trip + dangling-ref errors, each warning type + per-cycle id,
+      import/scope-aware call resolution, and bounded/non-double-counted verify trust
+      scores.'
+    input_types:
+    - SourceModules
+    output_types:
+    - TestReport
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: 0
+    implemented_sha: null
+    locations:
+    - path: tests/test_graph_core.py
+      start_line: null
+      end_line: null
+    - path: tests/test_serializer.py
+      start_line: null
+      end_line: null
+    - path: tests/test_warnings.py
+      start_line: null
+      end_line: null
+    - path: tests/test_translator_skeleton.py
+      start_line: null
+      end_line: null
+    - path: tests/test_translator_verify.py
+      start_line: null
+      end_line: null
+  git:
+    component_id: git
+    description: "External git \u2014 the version-control history; supplies diffs\
+      \ between the last-synced commit and HEAD so drift can be detected mechanically."
+    processing: git diff <last_synced_sha>..HEAD over tracked files.
+    input_types: []
+    output_types:
+    - GitDiff
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    implemented_version: null
+    implemented_sha: null
+    locations: []
+  git-sync:
+    component_id: git-sync
+    description: Drift reconciliation against git (IMPLEMENTED). Diffs each implemented
+      component against the commit its code was verified at and flags those whose
+      anchored code moved, via reconcile(). Closes the out-of-band-edit loop; surfaced
+      as the reconcile() MCP tool.
+    processing: 'On reconcile: diff since last-synced SHA -> components whose anchored
+      line ranges overlap changed hunks -> mark code-drifted; store new SHA. Requires
+      a per-component implemented-against-SHA (model extension).'
+    input_types:
+    - GitDiff
+    output_types:
+    - ReconcileReport
+    - DriftMark
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: gitsync.py
+      start_line: 1
+      end_line: 239
+    - path: server.py
+      start_line: 1003
+      end_line: 1044
+  gitsync-diff-mapper:
+    component_id: gitsync-diff-mapper
+    description: changed_line_ranges parses unified-diff hunks (new-file side) into
+      per-file line ranges; diff_mapper intersects them with component anchors (whole-file
+      anchors match any change), translating project-root-relative paths to repo-root-relative.
+    processing: Intersect diff hunks with component FileLocation ranges; emit the
+      overlap set. (Line-shift auto-tracking is a later refinement.)
+    input_types:
+    - GitDiff
+    output_types:
+    - DriftCandidateSet
+    z_level: 1
+    external: false
+    parent_id: git-sync
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: gitsync.py
+      start_line: 64
+      end_line: 146
+  gitsync-drift-marker:
+    component_id: gitsync-drift-marker
+    description: 'The reconcile driver''s marking pass: per implemented component,
+      diff its baseline (implemented_sha, else since/last_synced_sha) against HEAD;
+      set code_drifted on overlap, clear it on revert, report missing baselines.'
+    processing: Set or compare implemented_sha per component; surface those whose
+      anchored files changed since.
+    input_types:
+    - DriftCandidateSet
+    output_types:
+    - DriftMark
+    z_level: 1
+    external: false
+    parent_id: git-sync
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: gitsync.py
+      start_line: 167
+      end_line: 239
+  gitsync-reporter:
+    component_id: gitsync-reporter
+    description: ReconcileReport (drifted/recovered/no_baseline/checked) assembled
+      by reconcile, which also advances the graph's last_synced_sha to HEAD.
+    processing: Summarize drifted components + reasons; persist last_synced_sha on
+      the graph.
+    input_types:
+    - DriftCandidateSet
+    output_types:
+    - ReconcileReport
+    z_level: 1
+    external: false
+    parent_id: git-sync
+    version: 1
+    implemented_version: 1
+    implemented_sha: null
+    locations:
+    - path: gitsync.py
+      start_line: 154
+      end_line: 164
+    - path: gitsync.py
+      start_line: 177
+      end_line: 239
+  verification-router:
+    component_id: verification-router
+    description: Contract verification beyond structural fidelity (PLANNED, beta+).
+      Turns a leaf component's contract into an executable obligation and routes it
+      to the strongest ACHIEVABLE checker. MVP checker = LLM-generated property-based
+      tests (the run is the check); formal/SMT proof is explicitly deferred.
+    processing: 'Per leaf: extract obligation from contract -> classify (testable
+      / formally-checkable / unverifiable IO boundary) -> discharge -> feed result
+      into the fidelity report.'
+    input_types:
+    - LeafContract
+    output_types:
+    - ObligationResult
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    implemented_sha: null
+    locations: []
+  vr-obligation-extractor:
+    component_id: vr-obligation-extractor
+    description: Turns a leaf component's typed contract (receives/must_produce +
+      processing) into one or more checkable property statements.
+    processing: LLM autoformalizes the contract into properties/invariants over the
+      leaf's inputs and outputs.
+    input_types:
+    - LeafContract
+    output_types:
+    - Obligation
+    z_level: 1
+    external: false
+    parent_id: verification-router
+    version: 0
+    implemented_version: null
+    implemented_sha: null
+    locations: []
+  vr-checker-router:
+    component_id: vr-checker-router
+    description: 'Classifies each obligation by the strongest checker it admits: property-testable
+      (most), formally-checkable (pure/bounded), or unverifiable (external/IO boundary).'
+    processing: Route on contract shape + leaf purity/anchors; unverifiable leaves
+      are flagged, not failed.
+    input_types:
+    - Obligation
+    output_types:
+    - RoutedObligation
+    z_level: 1
+    external: false
+    parent_id: verification-router
+    version: 0
+    implemented_version: null
+    implemented_sha: null
+    locations: []
+  vr-pbt-generator:
+    component_id: vr-pbt-generator
+    description: 'MVP checker: generates and runs property-based tests (Hypothesis)
+      for a routed obligation; the test run is the check the LLM cannot fake.'
+    processing: Emit Hypothesis strategies + property asserts against the contract;
+      execute; report pass/counterexample.
+    input_types:
+    - RoutedObligation
+    output_types:
+    - ObligationResult
+    z_level: 1
+    external: false
+    parent_id: verification-router
+    version: 0
+    implemented_version: null
+    implemented_sha: null
+    locations: []
+  vr-formal-checker:
+    component_id: vr-formal-checker
+    description: 'DEFERRED (post-beta): discharges obligations on pure, bounded leaves
+      via SMT / a SAW-style equivalence check. Modeled to preserve the long-term direction;
+      out of MVP scope by design.'
+    processing: 'Future: lower a pure leaf + property to SMT (or Cryptol/SAW for crypto-shaped
+      kernels) and prove or find a counterexample.'
+    input_types:
+    - RoutedObligation
+    output_types:
+    - ObligationResult
+    z_level: 1
+    external: false
+    parent_id: verification-router
+    version: 0
+    implemented_version: null
+    implemented_sha: null
+    locations: []
+edges:
+- edge_type: FLOW
+  from_id: llm-operator
+  to_id: mcp-dispatch
+- edge_type: FLOW
+  from_id: mcp-dispatch
+  to_id: graph-core
+- edge_type: FLOW
+  from_id: mcp-dispatch
+  to_id: translator-pipeline
+- edge_type: FLOW
+  from_id: translator-pipeline
+  to_id: graph-core
+- edge_type: FLOW
+  from_id: graph-core
+  to_id: filesystem
+- edge_type: FLOW
+  from_id: filesystem
+  to_id: translator-pipeline
+- edge_type: FLOW
+  from_id: graph-core
+  to_id: mcp-dispatch
+- edge_type: FLOW
+  from_id: translator-pipeline
+  to_id: mcp-dispatch
+- edge_type: FLOW
+  from_id: mcp-dispatch
+  to_id: llm-operator
+- edge_type: FLOW
+  from_id: dispatch-lifecycle
+  to_id: dispatch-query
+- edge_type: FLOW
+  from_id: dispatch-query
+  to_id: dispatch-authoring
+- edge_type: REFERENCE
+  from_id: dispatch-lifecycle
+  to_id: dispatch-helpers
+- edge_type: REFERENCE
+  from_id: dispatch-query
+  to_id: dispatch-helpers
+- edge_type: FLOW
+  from_id: core-models
+  to_id: core-store
+- edge_type: FLOW
+  from_id: core-store
+  to_id: core-writer
+- edge_type: FLOW
+  from_id: core-writer
+  to_id: core-validator
+- edge_type: FLOW
+  from_id: core-validator
+  to_id: core-warnings
+- edge_type: FLOW
+  from_id: core-warnings
+  to_id: core-serializer
+- edge_type: FLOW
+  from_id: core-store
+  to_id: core-operations
+- edge_type: FLOW
+  from_id: core-operations
+  to_id: core-serializer
+- edge_type: FLOW
+  from_id: ops-neighbors
+  to_id: ops-references
+- edge_type: FLOW
+  from_id: ops-references
+  to_id: ops-subgraph
+- edge_type: FLOW
+  from_id: ops-subgraph
+  to_id: ops-path
+- edge_type: FLOW
+  from_id: ops-path
+  to_id: ops-impact
+- edge_type: FLOW
+  from_id: ops-walk-flow
+  to_id: ops-impact
+- edge_type: REFERENCE
+  from_id: ops-impact
+  to_id: ops-walk-flow
+- edge_type: FLOW
+  from_id: store-write
+  to_id: store-index
+- edge_type: FLOW
+  from_id: store-index
+  to_id: store-read
+- edge_type: FLOW
+  from_id: query-component-lookup
+  to_id: query-topology
+- edge_type: FLOW
+  from_id: query-topology
+  to_id: query-code-warnings
+- edge_type: FLOW
+  from_id: query-code-warnings
+  to_id: query-work-context
+- edge_type: FLOW
+  from_id: trans-ingestion
+  to_id: trans-skeleton
+- edge_type: REFERENCE
+  from_id: trans-ingestion
+  to_id: trans-models
+- edge_type: REFERENCE
+  from_id: trans-skeleton
+  to_id: trans-models
+- edge_type: FLOW
+  from_id: skel-symbol-extractor
+  to_id: skel-import-resolver
+- edge_type: FLOW
+  from_id: skel-symbol-extractor
+  to_id: skel-scope-classifier
+- edge_type: FLOW
+  from_id: skel-import-resolver
+  to_id: skel-call-graph
+- edge_type: FLOW
+  from_id: skel-call-graph
+  to_id: skel-dataflow
+- edge_type: FLOW
+  from_id: skel-dataflow
+  to_id: skel-assembler
+- edge_type: FLOW
+  from_id: skel-scope-classifier
+  to_id: skel-assembler
+- edge_type: REFERENCE
+  from_id: dispatch-query
+  to_id: core-operations
+- edge_type: REFERENCE
+  from_id: dispatch-authoring
+  to_id: core-writer
+- edge_type: REFERENCE
+  from_id: query-work-context
+  to_id: core-operations
+- edge_type: REFERENCE
+  from_id: query-work-context
+  to_id: core-store
+- edge_type: FLOW
+  from_id: dispatch-helpers
+  to_id: dispatch-lifecycle
+- edge_type: FLOW
+  from_id: dispatch-helpers
+  to_id: dispatch-query
+- edge_type: FLOW
+  from_id: dispatch-helpers
+  to_id: dispatch-authoring
+- edge_type: FLOW
+  from_id: dispatch-helpers
+  to_id: dispatch-prompts
+- edge_type: FLOW
+  from_id: core-writer
+  to_id: core-store
+- edge_type: REFERENCE
+  from_id: query-locate
+  to_id: ops-rank
+- edge_type: REFERENCE
+  from_id: query-component-lookup
+  to_id: query-response-shaper
+- edge_type: REFERENCE
+  from_id: query-topology
+  to_id: query-response-shaper
+- edge_type: REFERENCE
+  from_id: query-work-context
+  to_id: query-response-shaper
+- edge_type: REFERENCE
+  from_id: query-code-warnings
+  to_id: query-response-shaper
+- edge_type: REFERENCE
+  from_id: query-orient
+  to_id: query-response-shaper
+- edge_type: REFERENCE
+  from_id: query-locate
+  to_id: query-response-shaper
+- edge_type: FLOW
+  from_id: dispatch-authoring
+  to_id: dispatch-prompts
+- edge_type: FLOW
+  from_id: verify-location-anchor
+  to_id: verify-coverage
+- edge_type: FLOW
+  from_id: verify-coverage
+  to_id: verify-contract
+- edge_type: FLOW
+  from_id: verify-contract
+  to_id: verify-flow-grounding
+- edge_type: FLOW
+  from_id: verify-flow-grounding
+  to_id: verify-reconciler
+- edge_type: FLOW
+  from_id: lift-abstraction-planner
+  to_id: lift-contract-recoverer
+- edge_type: FLOW
+  from_id: lift-contract-recoverer
+  to_id: lift-flow-completer
+- edge_type: FLOW
+  from_id: lift-flow-completer
+  to_id: lift-intent-describer
+- edge_type: FLOW
+  from_id: lift-intent-describer
+  to_id: lift-consolidator
+- edge_type: FLOW
+  from_id: trans-skeleton
+  to_id: trans-lifter
+- edge_type: FLOW
+  from_id: trans-lifter
+  to_id: trans-verify
+- edge_type: FLOW
+  from_id: lift-scope-slicer
+  to_id: lift-abstraction-planner
+- edge_type: FLOW
+  from_id: lift-consolidator
+  to_id: lift-coverage-tracker
+- edge_type: FLOW
+  from_id: lift-coverage-tracker
+  to_id: lift-stitch-reconciler
+- edge_type: REFERENCE
+  from_id: lift-coverage-tracker
+  to_id: lift-scope-slicer
+- edge_type: REFERENCE
+  from_id: dispatch-translate
+  to_id: trans-lifter
+- edge_type: REFERENCE
+  from_id: dispatch-translate
+  to_id: trans-verify
+- edge_type: REFERENCE
+  from_id: test-suite
+  to_id: graph-core
+- edge_type: REFERENCE
+  from_id: test-suite
+  to_id: trans-skeleton
+- edge_type: REFERENCE
+  from_id: test-suite
+  to_id: trans-verify
+- edge_type: FLOW
+  from_id: gitsync-diff-mapper
+  to_id: gitsync-drift-marker
+- edge_type: FLOW
+  from_id: gitsync-diff-mapper
+  to_id: gitsync-reporter
+- edge_type: FLOW
+  from_id: git
+  to_id: git-sync
+- edge_type: REFERENCE
+  from_id: git-sync
+  to_id: graph-core
+- edge_type: REFERENCE
+  from_id: mcp-dispatch
+  to_id: git-sync
+- edge_type: FLOW
+  from_id: vr-obligation-extractor
+  to_id: vr-checker-router
+- edge_type: FLOW
+  from_id: vr-checker-router
+  to_id: vr-pbt-generator
+- edge_type: FLOW
+  from_id: vr-checker-router
+  to_id: vr-formal-checker
+- edge_type: REFERENCE
+  from_id: graph-core
+  to_id: verification-router
+- edge_type: REFERENCE
+  from_id: verification-router
+  to_id: mcp-dispatch
+- edge_type: REFERENCE
+  from_id: verification-router
+  to_id: test-suite
+warnings:
+- id: hanging_output__mcp-dispatch
+  ignore_reason: McpToolResponse is the terminal output returned to the LLM operator
+    (external boundary). No internal consumer needed.
+- id: hanging_output__graph-core
+  ignore_reason: "Graph/QueryResult/Warning are the terminal outputs consumed by mcp-dispatch\
+    \ serializers and the filesystem \u2014 boundary terminals, not internal gaps."
+- id: hanging_output__translator-pipeline
+  ignore_reason: MigrationReport is a terminal output returned to mcp-dispatch and
+    then to the LLM operator. Justified boundary terminal.
+- id: hanging_output__dispatch-lifecycle
+  ignore_reason: "GraphRegistry/GraphStats are serialized directly into McpToolResponse\
+    \ at the dispatch surface \u2014 justified terminal for this sub-handler group."
+- id: hanging_output__dispatch-query
+  ignore_reason: ComponentView/NavigationResult/WorkContext are the terminal read-path
+    outputs serialized as McpToolResponse back to the LLM operator.
+- id: hanging_output__dispatch-authoring
+  ignore_reason: MutationResult/WarningCount are terminal outputs returned as McpToolResponse
+    to the LLM operator after each write.
+- id: hanging_output__dispatch-prompts
+  ignore_reason: "ModePrompt is a terminal output \u2014 a text payload returned directly\
+    \ to the LLM operator to configure its working mode."
+- id: hanging_output__dispatch-helpers
+  ignore_reason: "GraphRegistry/SerializedComponent are internal helper outputs consumed\
+    \ by all dispatch handlers \u2014 fan-out to siblings via REFERENCE, not FLOW\
+    \ chains."
+- id: hanging_output__core-writer
+  ignore_reason: "ValidationError is a terminal error output returned synchronously\
+    \ to callers (dispatch-authoring, trans-commit) \u2014 no downstream sibling in\
+    \ graph-core consumes it."
+- id: hanging_output__core-validator
+  ignore_reason: "ValidationError is a terminal error signal raised synchronously\
+    \ by core-validator back to core-writer's caller \u2014 no sibling consumer at\
+    \ this level."
+- id: hanging_output__core-serializer
+  ignore_reason: YamlGraph is written to the external filesystem; Graph is returned
+    on load to the registry. Both are justified terminal outputs at the serializer
+    boundary.
+- id: hanging_output__ops-neighbors
+  ignore_reason: "NeighborList is consumed by the dispatch-query handler (get_neighbors)\
+    \ cross-boundary \u2014 terminal output within core-operations decomposition."
+- id: hanging_output__ops-references
+  ignore_reason: "ReferenceList is consumed by the dispatch-query handler (get_references)\
+    \ cross-boundary \u2014 terminal output within core-operations decomposition."
+- id: hanging_output__ops-subgraph
+  ignore_reason: "SubgraphView is consumed by dispatch-query (get_subgraph) cross-boundary\
+    \ \u2014 terminal output within core-operations decomposition."
+- id: hanging_output__ops-path
+  ignore_reason: "ComponentPath is consumed by dispatch-query (get_path) cross-boundary\
+    \ \u2014 terminal output within core-operations decomposition."
+- id: hanging_output__ops-impact
+  ignore_reason: "ImpactSet is consumed by dispatch-query (get_impact) cross-boundary\
+    \ \u2014 terminal output within core-operations decomposition."
+- id: hanging_output__ops-walk-flow
+  ignore_reason: "ComponentIdSet is an intermediate result consumed by ops-impact\
+    \ and ops-path within the same decomposition \u2014 already wired via FLOW; residual\
+    \ hanging on the sibling chain is a boundary artifact."
+- id: hanging_output__store-read
+  ignore_reason: "Component/Edge lookups from store-read are consumed by core-operations\
+    \ and core-writer cross-boundary \u2014 terminal outputs at the store-read level\
+    \ within core-store decomposition."
+- id: hanging_output__query-code-warnings
+  ignore_reason: "SourceSnippet/WarningList are terminal outputs returned to the LLM\
+    \ operator \u2014 exits dispatch-query boundary as McpToolResponse."
+- id: hanging_output__trans-models
+  ignore_reason: "RawNode/GraphDraft/MigrationReport are data contracts consumed cross-boundary\
+    \ by all pipeline stages via REFERENCE \u2014 trans-models is a shared type registry,\
+    \ not a flow producer."
+- id: hanging_output__query-response-shaper
+  ignore_reason: ShapedView is a shared formatting helper's output, returned by the
+    read handlers that REFERENCE it; no sibling FLOW consumer by design.
+- id: hanging_output__ops-rank
+  ignore_reason: RankedComponents is consumed by query-locate across the boundary
+    via REFERENCE (the read path), not by a core-operations sibling.
+- id: hanging_output__dispatch-translate
+  ignore_reason: TranslateResult is a terminal MCP tool response returned to the operator
+    (like the other dispatch-* tool surfaces), not consumed by a sibling.
+- id: hanging_output__test-suite
+  ignore_reason: TestReport (pass/fail) is a terminal CI artifact, not consumed by
+    any in-graph component. Intentional side output.
+- id: hanging_output__git-sync
+  ignore_reason: Planned subsystem; ReconcileReport/DriftMark consumed by the operator
+    + graph-core (REFERENCE), wired at implementation.
+- id: hanging_output__verification-router
+  ignore_reason: Planned subsystem; ObligationResult feeds the fidelity report at
+    implementation.
+- id: starved_input__graph-core
+  ignore_reason: "MutationRequest/QueryRequest enter graph-core from mcp-dispatch\
+    \ at the z=0 FLOW boundary \u2014 justified entry inputs from an external caller."
+- id: starved_input__translator-pipeline
+  ignore_reason: "SourceRoot/TranslateCommand enter translator-pipeline from mcp-dispatch\
+    \ and the filesystem at the z=0 boundary \u2014 justified entry inputs."
+- id: starved_input__dispatch-lifecycle
+  ignore_reason: "McpToolCall enters dispatch-lifecycle from the parent mcp-dispatch\
+    \ fan-in \u2014 now that dispatch-helpers feeds lifecycle via FLOW, the McpToolCall\
+    \ input type is still an external boundary entry that arrives from llm-operator\
+    \ at z=0. Justified boundary entry."
+- id: starved_input__dispatch-query
+  ignore_reason: "McpToolCall enters dispatch-query from the parent mcp-dispatch which\
+    \ fans out to all handler groups \u2014 justified entry at this decomposition\
+    \ boundary."
+- id: starved_input__dispatch-authoring
+  ignore_reason: "McpToolCall enters dispatch-authoring from parent mcp-dispatch fan-out\
+    \ \u2014 justified entry at this decomposition boundary."
+- id: starved_input__dispatch-prompts
+  ignore_reason: "McpToolCall enters dispatch-prompts from parent mcp-dispatch fan-out\
+    \ \u2014 justified entry at this decomposition boundary."
+- id: starved_input__core-writer
+  ignore_reason: "MutationRequest enters core-writer from dispatch-authoring/trans-commit\
+    \ cross-boundary \u2014 justified entry point for the write path."
+- id: starved_input__core-validator
+  ignore_reason: "Component/Edge enter core-validator from core-writer which calls\
+    \ it synchronously \u2014 cross-boundary call, not a sibling FLOW, so no upstream\
+    \ sibling producer exists at this level."
+- id: starved_input__core-warnings
+  ignore_reason: "Graph enters core-warnings from core-writer after each mutation\
+    \ \u2014 this is a cross-level call from the write path, not a sibling FLOW input."
+- id: starved_input__core-operations
+  ignore_reason: "QueryRequest enters core-operations from dispatch-query cross-boundary\
+    \ \u2014 justified entry point for the read path at this decomposition level."
+- id: starved_input__core-serializer
+  ignore_reason: "Graph/FilePath enter core-serializer from core-writer (persist)\
+    \ and dispatch-lifecycle (load_graph) \u2014 cross-boundary calls, not sibling\
+    \ FLOW inputs at this level."
+- id: starved_input__ops-references
+  ignore_reason: "Graph/ComponentId/Direction are passed into ops-references from\
+    \ the dispatch-query handler cross-boundary \u2014 justified entry inputs within\
+    \ core-operations decomposition."
+- id: starved_input__ops-subgraph
+  ignore_reason: "Graph/ComponentId/Depth are passed in from dispatch-query cross-boundary\
+    \ \u2014 justified entry inputs within core-operations decomposition."
+- id: starved_input__ops-path
+  ignore_reason: "Graph/FromComponentId/ToComponentId are passed in from dispatch-query\
+    \ cross-boundary \u2014 justified entry inputs within core-operations decomposition."
+- id: starved_input__ops-impact
+  ignore_reason: "Graph/ComponentId are passed in from dispatch-query (get_impact)\
+    \ cross-boundary \u2014 justified entry inputs within core-operations decomposition."
+- id: starved_input__store-read
+  ignore_reason: "ComponentId enters store-read from core-operations and core-writer\
+    \ cross-boundary \u2014 justified entry input within core-store decomposition."
+- id: starved_input__store-index
+  ignore_reason: "Component/Edge enter store-index from store-write as a synchronous\
+    \ call \u2014 the FLOW edge store-write \u2192 store-index captures this; the\
+    \ starved input is on the direct Component/Edge types not carried by that FLOW."
+- id: starved_input__query-topology
+  ignore_reason: "McpToolCall enters query-topology from parent dispatch-query fan-out\
+    \ \u2014 justified entry at this decomposition boundary."
+- id: starved_input__query-work-context
+  ignore_reason: "McpToolCall enters query-work-context from parent dispatch-query\
+    \ fan-out \u2014 justified entry at this decomposition boundary."
+- id: starved_input__query-code-warnings
+  ignore_reason: "McpToolCall enters query-code-warnings from parent dispatch-query\
+    \ fan-out \u2014 justified entry at this decomposition boundary."
+- id: starved_input__skel-import-resolver
+  ignore_reason: "SourceRoot enters skel-import-resolver from the parent trans-skeleton's\
+    \ context \u2014 justified entry input for file-path resolution within the skeleton\
+    \ decomposition."
+- id: starved_input__skel-call-graph
+  ignore_reason: "SymbolTable enters skel-call-graph from skel-symbol-extractor cross-boundary\
+    \ (the FLOW goes skel-symbol-extractor \u2192 skel-import-resolver \u2192 skel-call-graph);\
+    \ the direct SymbolTable input is carried implicitly by that FLOW chain."
+- id: starved_input__skel-dataflow
+  ignore_reason: "SymbolTable enters skel-dataflow from skel-symbol-extractor cross-boundary\
+    \ via the pipeline chain \u2014 justified entry within trans-skeleton decomposition."
+- id: starved_input__skel-assembler
+  ignore_reason: SymbolTable/ResolvedImports/CallGraph all flow into skel-assembler
+    from upstream siblings via the FLOW chain; these are multi-producer fan-ins captured
+    by the existing FLOW edges from skel-scope-classifier and skel-dataflow.
+- id: starved_input__trans-verify
+  ignore_reason: CodeSkeleton enters trans-verify from trans-skeleton cross-boundary
+    (the skeleton is threaded through trans-lifter's context to the verify stage);
+    justified entry input at this pipeline decomposition boundary.
+- id: coverage_gap__mcp-dispatch
+  ignore_reason: "McpToolResponse exits mcp-dispatch back to the LLM operator external\
+    \ boundary \u2014 the output is covered by llm-operator at z=0; the gap is a cross-level\
+    \ coverage artifact since the exit node is an external sibling."
+- id: coverage_gap__graph-core
+  ignore_reason: "MutationRequest/QueryRequest enter from mcp-dispatch cross-boundary\
+    \ (not a child entry node); Warning/QueryResult exit to mcp-dispatch cross-boundary.\
+    \ All four types are covered by the z=0 FLOW but not by internal entry/exit children\
+    \ \u2014 justified cross-boundary coverage gap."
+- id: coverage_gap__translator-pipeline
+  ignore_reason: "SourceRoot enters translator-pipeline from filesystem/mcp-dispatch\
+    \ at z=0; the internal entry node (trans-ingestion) handles DispatchedFiles not\
+    \ SourceRoot directly. Justified cross-boundary coverage gap \u2014 trans-session\
+    \ is the real entry point that converts SourceRoot."
+- id: coverage_gap__dispatch-query
+  ignore_reason: "ComponentView/NavigationResult are produced by child nodes but not\
+    \ covered as exit types at the parent level \u2014 they flow up to the McpToolResponse\
+    \ boundary. Mid-decomposition coverage gap; all child outputs are justified terminals."
+- id: coverage_gap__core-store
+  ignore_reason: "Graph exits core-store to core-operations and core-writer cross-boundary\
+    \ \u2014 the exit node (store-read) produces Component/Edge not Graph directly.\
+    \ Justified cross-boundary coverage gap; Graph is the implicit shared state container."
+- id: coverage_gap__core-operations
+  ignore_reason: "QueryRequest enters and QueryResult exits core-operations from/to\
+    \ dispatch-query cross-boundary \u2014 internal children (ops-*) each handle specific\
+    \ query sub-types. The parent-level types are cross-boundary contracts, not covered\
+    \ by any single entry/exit child node. Justified gap."
+- id: flow_cycle__filesystem_graph-core_translator-pipeline
+  ignore_reason: Pre-existing intentional job-queue/architecture loop.
+last_synced_sha: null

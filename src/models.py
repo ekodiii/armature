@@ -47,6 +47,14 @@ class Component:
     # the `version` whose spec the code was last implemented against.
     # None = never implemented. < version = spec changed since, code is stale.
     implemented_version: Optional[int] = None
+    # the git commit HEAD was at when mark_implemented last ran — the baseline
+    # git-sync diffs against to detect that the code moved under this node.
+    implemented_sha: Optional[str] = None
+    # set by a reconcile pass when the anchored code changed since implemented_sha,
+    # cleared on the next mark_implemented. This is the one staleness signal that
+    # cannot be derived from in-graph state alone — git is the external oracle, so
+    # reconcile materializes it. Drives the 'drifted' status.
+    code_drifted: bool = False
 
 
 # Warnings
@@ -66,6 +74,9 @@ class Graph:
     components: dict[str, Component] = field(default_factory=dict)
     edges: dict[str, Edge] = field(default_factory=dict)
     warnings: list[Warning] = field(default_factory=list)
+    # commit a `reconcile` last synced this graph to; the default baseline for
+    # drift detection on components that have no implemented_sha of their own.
+    last_synced_sha: Optional[str] = None
 
     @staticmethod
     def new() -> "Graph":

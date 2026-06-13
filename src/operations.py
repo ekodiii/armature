@@ -5,6 +5,50 @@ from models import Component, EdgeType, Graph
 from store import get_component, get_edge
 
 
+def rank(graph: Graph, query: str, top_k: int = 10) -> list[tuple[str, float]]:
+    """Score each component by relevance to query and return top-k (component_id, score) pairs.
+
+    Scoring weights (case-insensitive substring match):
+      3.0  — id contains query
+      2.0  — description contains query
+      1.0  — processing contains query
+    A small structural boost (+0.5) is added for each already-matched neighbor
+    (FLOW or SCOPE) so closely wired clusters surface together.
+    Returns a list sorted descending by score, capped at top_k."""
+    q = query.lower()
+    if not q:
+        return []
+
+    base: dict[str, float] = {}
+    for cid, c in graph.components.items():
+        score = 0.0
+        if q in cid.lower():
+            score += 3.0
+        if q in c.description.lower():
+            score += 2.0
+        if q in c.processing.lower():
+            score += 1.0
+        if score > 0:
+            base[cid] = score
+
+    # Structural proximity boost: components adjacent (any direction, FLOW/SCOPE)
+    # to a matched node get a small lift so related clusters surface together.
+    boosted: dict[str, float] = dict(base)
+    for cid, score in base.items():
+        c = graph.components[cid]
+        neighbors_ids = set()
+        for edge_id in c.edges_in + c.edges_out:
+            edge = graph.edges.get(edge_id)
+            if edge and edge.edge_type in (EdgeType.FLOW, EdgeType.SCOPE):
+                other = edge.from_id if edge.to_id == cid else edge.to_id
+                neighbors_ids.add(other)
+        for nid in neighbors_ids:
+            boosted[nid] = boosted.get(nid, 0.0) + 0.5
+
+    ranked = sorted(boosted.items(), key=lambda kv: kv[1], reverse=True)
+    return ranked[:top_k]
+
+
 def get_neighbors(graph: Graph, component_id: str, edge_type: EdgeType, upstream: bool = False) -> list[Component]:
     component = get_component(graph, component_id)
     edge_ids = component.edges_in if upstream else component.edges_out

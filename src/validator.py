@@ -172,31 +172,47 @@ def validate_output_coverage(graph: Graph, component: Component) -> list[str]:
 
 
 def detect_cycles(graph: Graph, edge_type: EdgeType) -> list[str]:
-    visited = set()
-    path = set()
-    cycle = []
+    """Return the node ids forming the first cycle of `edge_type`, in order, or
+    [] if the graph is acyclic. Iterative (no recursion-depth limit on deep
+    chains) three-colour DFS; reconstructs the actual cycle path rather than
+    just the re-entry node, and keeps no state across roots."""
+    WHITE, GREY, BLACK = 0, 1, 2
+    color: dict[str, int] = {cid: WHITE for cid in graph.components}
+    parent: dict[str, str] = {}
 
-    def dfs(component_id: str) -> bool:
-        visited.add(component_id)
-        path.add(component_id)
+    def successors(cid: str) -> list[str]:
+        return [
+            get_edge(graph, eid).to_id
+            for eid in get_component(graph, cid).edges_out
+            if get_edge(graph, eid).edge_type == edge_type
+        ]
 
-        component = get_component(graph, component_id)
-        for edge_id in component.edges_out:
-            edge = get_edge(graph, edge_id)
-            if edge.edge_type != edge_type:
+    for root in graph.components:
+        if color[root] != WHITE:
+            continue
+        # Each stack frame is [node, its successors, next-index].
+        color[root] = GREY
+        stack: list[list] = [[root, successors(root), 0]]
+        while stack:
+            node, succs, i = stack[-1]
+            if i == len(succs):
+                color[node] = BLACK
+                stack.pop()
                 continue
-            if edge.to_id not in visited:
-                if dfs(edge.to_id):
-                    return True
-            elif edge.to_id in path:
-                cycle.append(edge.to_id)
-                return True
+            stack[-1][2] = i + 1
+            nxt = succs[i]
+            if color[nxt] == WHITE:
+                color[nxt] = GREY
+                parent[nxt] = node
+                stack.append([nxt, successors(nxt), 0])
+            elif color[nxt] == GREY:
+                # Back edge node -> nxt closes a cycle; walk parents up to nxt.
+                cycle = [node]
+                cur = node
+                while cur != nxt and cur in parent:
+                    cur = parent[cur]
+                    cycle.append(cur)
+                cycle.reverse()
+                return cycle
 
-        path.remove(component_id)
-        return False
-
-    for component_id in graph.components:
-        if component_id not in visited:
-            dfs(component_id)
-
-    return cycle
+    return []

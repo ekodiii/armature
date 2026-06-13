@@ -1,0 +1,22 @@
+[project]
+name = "armature"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "leidenalg>=0.12.0",
+    "mcp>=1.27.2",
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+# The modules are imported flat (e.g. `from models import Graph`), so put this
+# directory on sys.path and collect tests from ./tests.
+pythonpath = ["."]
+testpaths = ["tests"]

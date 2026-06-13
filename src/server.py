@@ -47,9 +47,11 @@ Execution protocol (all modes):
   5. REPEAT.
 """
 
+import dataclasses
 import json
 import os
 import re
+import shutil
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -61,8 +63,14 @@ from operations import (
     get_path as _path,
     get_references as _references,
     get_subgraph as _subgraph,
+    rank as _rank,
 )
 from serializer import load_graph, save_graph
+from gitsync import (
+    GitError as _GitError,
+    current_head as _current_head,
+    reconcile as _reconcile,
+)
 from store import get_component as _get_component
 from graph_warnings import (
     get_active_warnings as _active_warnings,
@@ -76,7 +84,8 @@ from writer import (
     propose_edge as _propose_edge,
     update_component as _update_component,
 )
-
+from translator import lift as _lift
+from translator import verify as _verifylib
 # --- workspace configuration -----------------------------------------------
 # Central library, location-independent so it works on CLI, desktop, and web.
 ARMATURE_HOME = os.environ.get("ARMATURE_HOME", os.path.expanduser("~/.armature"))
@@ -91,6 +100,12 @@ os.makedirs(GRAPHS_DIR, exist_ok=True)
 # Active-session state.
 GRAPH: Optional[Graph] = None
 ACTIVE: Optional[str] = None
+
+# Translation-session state: the skeleton is expensive to build, so it is cached
+# across translate_* calls (coverage/stitch/verify reuse it) until the next
+# translate_prepare rebuilds it for a (possibly different) source tree.
+_TRANSLATE_SKELETON = None
+_TRANSLATE_ROOT: Optional[str] = None
 
 _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _-]*")
 
@@ -126,8 +141,13 @@ def _project_root() -> str:
 
 
 def _set_active(name: str, graph: Graph) -> None:
-    global GRAPH, ACTIVE
+    global GRAPH, ACTIVE, _TRANSLATE_SKELETON, _TRANSLATE_ROOT
     GRAPH, ACTIVE = graph, name
+    # The cached skeleton belongs to whatever graph was active when it was built.
+    # Switching graphs invalidates it, or translate_* would audit this graph
+    # against the previous project's source tree.
+    _TRANSLATE_SKELETON = None
+    _TRANSLATE_ROOT = None
     reg = _load_registry()
     reg["active"] = name
     _save_registry(reg)
@@ -143,21 +163,33 @@ def _no_active() -> dict:
     }
 
 
-# Resume the last-active graph from a previous session, if still present.
+# Resume the last-active graph from a previous session, if still present. A
+# corrupt or unreadable file must not crash server startup — the operator can
+# still open another graph.
 _boot = _load_registry()
 if _boot.get("active") and _boot["active"] in _boot["graphs"]:
     _boot_path = _boot["graphs"][_boot["active"]]
     if os.path.exists(_boot_path):
-        GRAPH = load_graph(_boot_path)
-        ACTIVE = _boot["active"]
+        try:
+            GRAPH = load_graph(_boot_path)
+            ACTIVE = _boot["active"]
+        except Exception:
+            GRAPH = None
+            ACTIVE = None
 
 
 # --- internal helpers ------------------------------------------------------
-def _persist() -> None:
-    """Recompute warnings (preserving ignored state) and write the active graph to
-    its registered file. Called after every successful mutation so the graph is the
-    durable source of truth between context wipes."""
+def _recompute_warnings() -> None:
+    """Refresh derived warnings in memory (preserving ignored state) without
+    touching disk. Used by read paths so a query never dirties the graph file."""
     GRAPH.warnings = run_all_warnings(GRAPH)
+
+
+def _persist() -> None:
+    """Recompute warnings and write the active graph to its registered file.
+    Called after every successful mutation so the graph is the durable source of
+    truth between context wipes."""
+    _recompute_warnings()
     save_graph(GRAPH, _active_path())
 
 
@@ -182,11 +214,14 @@ def _loc_dict(loc: FileLocation) -> dict:
 
 
 def _status(c: Component) -> str:
-    """Implementation status, derived from version vs implemented_version:
-    'planned' (no code yet), 'implemented' (code matches spec), or 'stale' (spec
-    was edited after the code was written, so the code needs updating)."""
+    """Implementation status: 'planned' (no code yet), 'drifted' (the anchored
+    code changed in git since it was last verified — flagged by reconcile),
+    'stale' (spec edited after the code was written), or 'implemented' (code
+    matches the current spec)."""
     if c.implemented_version is None:
         return "planned"
+    if c.code_drifted:
+        return "drifted"
     if c.implemented_version == c.version:
         return "implemented"
     return "stale"
@@ -209,6 +244,47 @@ def _comp_dict(c: Component) -> dict:
         "status": _status(c),
         "locations": [_loc_dict(loc) for loc in c.locations],
     }
+
+
+def _terse(c: Component, fields: Optional[list[str]] = None) -> dict:
+    """Compact view of a component for token-efficient read responses.
+
+    Default (fields=None) emits: id, one-line description, input_types,
+    output_types, n_children, n_edges, status.  Pass `fields` with any subset
+    of {"processing", "locations", "edges_in", "edges_out", "children",
+    "parent_id", "version", "z_level", "external"} to expand specific keys.
+    """
+    desc = c.description.split("\n")[0]  # first line only
+    out: dict = {
+        "component_id": c.component_id,
+        "description": desc,
+        "input_types": c.input_types,
+        "output_types": c.output_types,
+        "n_children": len(c.children),
+        "n_edges": len(c.edges_in) + len(c.edges_out),
+        "status": _status(c),
+    }
+    if fields:
+        for f in fields:
+            if f == "processing":
+                out["processing"] = c.processing
+            elif f == "locations":
+                out["locations"] = [_loc_dict(loc) for loc in c.locations]
+            elif f == "edges_in":
+                out["edges_in"] = c.edges_in
+            elif f == "edges_out":
+                out["edges_out"] = c.edges_out
+            elif f == "children":
+                out["children"] = c.children
+            elif f == "parent_id":
+                out["parent_id"] = c.parent_id
+            elif f == "version":
+                out["version"] = c.version
+            elif f == "z_level":
+                out["z_level"] = c.z_level
+            elif f == "external":
+                out["external"] = c.external
+    return out
 
 
 # One-line meaning + ignore guidance per warning type. Returned once per type that
@@ -281,6 +357,14 @@ def new_graph(name: str, path: Optional[str] = None, overwrite: bool = False) ->
                 f"open_graph('{name}'); to discard and recreate it pass overwrite=True."
             )
         }
+    # overwrite is destructive: keep a one-deep backup so an accidental clobber
+    # of an existing graph (especially one in the central library, which has no
+    # VCS behind it) is recoverable.
+    if os.path.exists(target) and overwrite:
+        try:
+            shutil.copy2(target, target + ".bak")
+        except OSError:
+            pass
     graph = Graph.new()
     save_graph(graph, target)
     reg["graphs"][name] = target
@@ -306,7 +390,11 @@ def open_graph(name: str) -> dict:
     path = reg["graphs"][name]
     if not os.path.exists(path):
         return {"error": f"Graph '{name}' is registered but its file is missing at {path}."}
-    _set_active(name, load_graph(path))
+    try:
+        graph = load_graph(path)
+    except Exception as e:
+        return {"error": f"Failed to load graph '{name}' from {path}: {e}"}
+    _set_active(name, graph)
     return get_graph_stats()
 
 
@@ -319,10 +407,9 @@ def get_graph_stats() -> dict:
     Returns {"error": ...} with the list of available graphs if none is open."""
     if GRAPH is None:
         return _no_active()
-    GRAPH.warnings = run_all_warnings(GRAPH)
-    save_graph(GRAPH, _active_path())
+    _recompute_warnings()
     max_z = max((c.z_level for c in GRAPH.components.values()), default=0)
-    by_status = {"planned": 0, "implemented": 0, "stale": 0}
+    by_status = {"planned": 0, "implemented": 0, "stale": 0, "drifted": 0}
     for c in GRAPH.components.values():
         by_status[_status(c)] += 1
     return {
@@ -333,6 +420,7 @@ def get_graph_stats() -> dict:
         "edges": len(GRAPH.edges),
         "max_z_level": max_z,
         "by_status": by_status,
+        "last_synced_sha": GRAPH.last_synced_sha,
         "active_warnings": len(_active_warnings(GRAPH.warnings)),
     }
 
@@ -478,7 +566,7 @@ def get_active_warnings() -> dict:
     Returns {"warnings": [{id, warning_type, affected}], "legend": {type: meaning}}."""
     if GRAPH is None:
         return _no_active()
-    _persist()
+    _recompute_warnings()
     active = _active_warnings(GRAPH.warnings)
     return {
         "warnings": [
@@ -491,6 +579,67 @@ def get_active_warnings() -> dict:
             if w.warning_type in WARNING_LEGEND
         },
     }
+
+
+@mcp.tool()
+def get_orient() -> dict:
+    """Compact whole-graph orientation map: one cheap call that returns the entire
+    SCOPE tree as a terse indented list so an operator grasps the whole layout
+    without crawling get_subgraph node by node.
+
+    Each line in the map contains: z-level indent, id, one-line description,
+    input_types → output_types, status.  Returns {"map": [terse-component, ...]}
+    in pre-order (parents before children) with an "indent" key added per node."""
+    if GRAPH is None:
+        return _no_active()
+
+    # Find roots: components with no parent_id
+    roots = [c for c in GRAPH.components.values() if c.parent_id is None]
+    roots.sort(key=lambda c: c.component_id)
+
+    result = []
+
+    def walk(cid: str, depth: int):
+        c = GRAPH.components.get(cid)
+        if c is None:
+            return
+        node = _terse(c)
+        node["indent"] = depth
+        result.append(node)
+        for child_id in sorted(c.children):
+            walk(child_id, depth + 1)
+
+    for root in roots:
+        walk(root.component_id, 0)
+
+    return {"map": result, "count": len(result)}
+
+
+@mcp.tool()
+def locate(query: str, top_k: int = 8) -> dict:
+    """Intent-to-location router: given a keyword or question, returns the most
+    relevant components ranked by relevance (id/description/processing match plus
+    structural proximity), each with its terse summary AND its exact file locations
+    so you go from intent to precise code range in one call.
+
+    Args:
+        query:  keyword or short phrase to match against component ids,
+                descriptions, and processing text.
+        top_k:  maximum number of results to return (default 8).
+
+    Returns {"matches": [{terse-component + locations + score}]} or {"error": ...}."""
+    if GRAPH is None:
+        return _no_active()
+    ranked = _rank(GRAPH, query, top_k=top_k)
+    matches = []
+    for cid, score in ranked:
+        c = GRAPH.components.get(cid)
+        if c is None:
+            continue
+        node = _terse(c, fields=["locations"])
+        node["score"] = round(score, 2)
+        matches.append(node)
+    return {"matches": matches, "query": query}
 
 
 @mcp.tool()
@@ -509,9 +658,16 @@ def get_component_code(component_id: str) -> dict:
         return err
     if not c.locations:
         return {"error": f"Component '{component_id}' has no locations set."}
+    root = os.path.realpath(_project_root())
     out = []
     for loc in c.locations:
-        abspath = os.path.join(_project_root(), loc.path)
+        # Containment check: a graph file can come from anywhere (shared, checked
+        # into a repo), so a location path must not escape the project root via
+        # "../" or an absolute path. Resolve symlinks before comparing.
+        abspath = os.path.realpath(os.path.join(root, loc.path))
+        if abspath != root and not abspath.startswith(root + os.sep):
+            out.append({"path": loc.path, "error": "path escapes project root"})
+            continue
         try:
             with open(abspath) as f:
                 lines = f.readlines()
@@ -532,7 +688,11 @@ def get_component_code(component_id: str) -> dict:
 
 
 @mcp.tool()
-def get_work_context(component_id: str) -> dict:
+def get_work_context(
+    component_id: str,
+    terse: bool = False,
+    expand_fields: Optional[list[str]] = None,
+) -> dict:
     """The minimal local context needed to safely write or change ONE component --
     call this IMMEDIATELY BEFORE every propose_component / update_component on a
     component, and before implementing its code. Re-pull it each time rather than
@@ -549,6 +709,13 @@ def get_work_context(component_id: str) -> dict:
       references    -- weak REFERENCE links (cross-boundary hints)
       code          -- current source at its locations (or null)
       warnings      -- active warnings on this exact node
+
+    Token-efficiency options:
+      terse=True         -- route neighbor/child serialization through the compact
+                           shaper (id + one-line desc + types + counts); the focal
+                           component is always returned in full.
+      expand_fields=[..] -- when terse=True, also include these extra keys for each
+                           terse neighbor (e.g. ["locations", "processing"]).
     """
     if GRAPH is None:
         return _no_active()
@@ -571,16 +738,23 @@ def get_work_context(component_id: str) -> dict:
             "input_types": p.input_types,
             "output_types": p.output_types,
         }
-    children = {}
-    for ch in c.children:
-        cc = _get_component(GRAPH, ch)
-        children[ch] = {
-            "input_types": cc.input_types,
-            "output_types": cc.output_types,
-            "status": _status(cc),
-        }
+    children: dict
+    if terse:
+        children = {}
+        for ch in c.children:
+            cc = _get_component(GRAPH, ch)
+            children[ch] = _terse(cc, fields=expand_fields)
+    else:
+        children = {}
+        for ch in c.children:
+            cc = _get_component(GRAPH, ch)
+            children[ch] = {
+                "input_types": cc.input_types,
+                "output_types": cc.output_types,
+                "status": _status(cc),
+            }
     code = get_component_code(component_id).get("locations") if c.locations else None
-    GRAPH.warnings = run_all_warnings(GRAPH)
+    _recompute_warnings()
     warns = [
         {"id": w.id, "warning_type": w.warning_type, "affected": w.affected}
         for w in _active_warnings(GRAPH.warnings)
@@ -611,19 +785,20 @@ def get_work_context(component_id: str) -> dict:
 
 @mcp.tool()
 def get_pending_implementation() -> dict:
-    """Components whose code does not match the graph: 'planned' (never built) or
-    'stale' (spec edited since the code was last written). This is the work queue
-    for IMPLEMENTATION MODE. External (atomic boundary) nodes are excluded -- they
+    """Components whose code does not match the graph: 'planned' (never built),
+    'stale' (spec edited since the code was last written), or 'drifted' (code
+    changed in git since it was last verified). This is the work queue for
+    IMPLEMENTATION MODE. External (atomic boundary) nodes are excluded -- they
     are not ours to implement.
 
-    Sorted stale-first, then leaves-first, then shallowest. Returns
+    Sorted drifted/stale-first, then leaves-first, then shallowest. Returns
     {"pending": [{component_id, status, z_level, is_leaf, locations}], "count"}."""
     if GRAPH is None:
         return _no_active()
     pending = []
     for c in GRAPH.components.values():
         st = _status(c)
-        if st in ("planned", "stale") and not c.external:
+        if st in ("planned", "stale", "drifted") and not c.external:
             pending.append(
                 {
                     "component_id": c.component_id,
@@ -633,7 +808,7 @@ def get_pending_implementation() -> dict:
                     "locations": [_loc_dict(loc) for loc in c.locations],
                 }
             )
-    pending.sort(key=lambda p: (p["status"] != "stale", not p["is_leaf"], p["z_level"]))
+    pending.sort(key=lambda p: (p["status"] not in ("stale", "drifted"), not p["is_leaf"], p["z_level"]))
     return {"pending": pending, "count": len(pending)}
 
 
@@ -808,9 +983,10 @@ def ignore_warning(warning_id: str, reason: str) -> dict:
 def mark_implemented(component_id: str) -> dict:
     """Record that this component's code has been written to match its CURRENT spec
     version. Use it in implementation mode after you have written/updated the code
-    and set its locations. It advances the component from 'planned'/'stale' to
-    'implemented' without changing the spec. Any later edit to the component bumps
-    its version and it reads as 'stale' again.
+    and set its locations. It advances the component from 'planned'/'stale'/'drifted'
+    to 'implemented' without changing the spec, and stamps the current git commit
+    as the baseline for future drift detection. Any later spec edit reads as
+    'stale'; any later code change (detected by reconcile) reads as 'drifted'.
 
     Returns {"ok": True, "component_id", "status"} or {"error": ...}."""
     if GRAPH is None:
@@ -818,9 +994,169 @@ def mark_implemented(component_id: str) -> dict:
     c, err = _fetch(component_id)
     if err:
         return err
-    _mark_implemented(GRAPH, component_id)
+    _mark_implemented(GRAPH, component_id, sha=_repo_head())
     save_graph(GRAPH, _active_path())
     return {"ok": True, "component_id": component_id, "status": _status(c)}
+
+
+@mcp.tool()
+def reconcile(since: Optional[str] = None, include_uncommitted: bool = False) -> dict:
+    """Reconcile the active graph against git: detect components whose anchored
+    code has CHANGED since it was last verified, and flag them 'drifted'. This is
+    how the graph stays honest when code is edited outside Armature (a normal
+    editor, another agent, a teammate's commit) — nothing else flips those nodes.
+
+    Each implemented component is diffed against its own verified baseline commit
+    (its implemented_sha), falling back to `since` or the graph's last_synced_sha.
+    Components with no baseline are reported so you can re-mark them. Advances
+    last_synced_sha to HEAD.
+
+    - since: optional commit to diff from for components lacking their own baseline.
+    - include_uncommitted: also count working-tree edits not yet committed.
+
+    Returns {ok, head, drifted:[{component_id, paths}], recovered:[...],
+    no_baseline:[...], checked, clean} or {"error": ...}."""
+    if GRAPH is None:
+        return _no_active()
+    try:
+        report = _reconcile(GRAPH, _project_root(), since=since,
+                            include_uncommitted=include_uncommitted)
+    except _GitError as e:
+        return {"error": f"git-sync could not run: {e}"}
+    _persist()
+    return {
+        "ok": True,
+        "head": report.head,
+        "drifted": [{"component_id": cid, "paths": paths} for cid, paths in report.drifted],
+        "recovered": report.recovered,
+        "no_baseline": report.no_baseline,
+        "checked": report.checked,
+        "clean": report.is_clean,
+    }
+
+
+def _repo_head() -> Optional[str]:
+    """Current git HEAD of the project root, or None if it is not a repo / git is
+    unavailable — mark_implemented still works, just without a drift baseline."""
+    try:
+        return _current_head(_project_root())
+    except _GitError:
+        return None
+
+
+# ===========================================================================
+# Translation orchestration tools -- the operator's runtime surface for driving
+# a codebase translation. Thin wrappers over translator/lift.py + verify.py that
+# operate on the active graph (GRAPH) and a cached skeleton of the target tree.
+# ===========================================================================
+def _no_skeleton() -> dict:
+    return {
+        "error": (
+            "No translation skeleton is cached. Call "
+            "translate_prepare(source_root) first to ingest and skeleton the "
+            "target tree before coverage/stitch/verify."
+        )
+    }
+
+
+@mcp.tool()
+def translate_prepare(source_root: str, scope: Optional[str] = None) -> dict:
+    """Start (or step into) a region of a codebase translation. Ingests and
+    skeletons the target tree, caches the skeleton for later coverage/stitch/
+    verify calls, and returns the region worksheet the operator needs to author
+    this region by hand.
+
+    - source_root: path to the code being translated (e.g. "translator").
+    - scope: None for the whole-codebase top pass (author the z=0 subsystems);
+      a path-prefix (e.g. "translator/") to slice one region for a focused pass.
+
+    Returns a dict with: the region summary (in-region symbol count, boundary
+    stubs), the grouping worksheet (call-graph clusters, entrypoints, fan-in
+    hubs, pure leaves), contract hints (with needs_naming flags for erased
+    dict/primitive contracts), and flow candidates (producer->consumer edges
+    plus blind-spot flags). You then AUTHOR via propose_component/propose_edge --
+    nothing here writes to the graph. See translator/LIFT_PROTOCOL.md."""
+    if GRAPH is None:
+        return _no_active()
+    global _TRANSLATE_SKELETON, _TRANSLATE_ROOT
+    ctx = _lift.prepare_lift(source_root, scope)
+    _TRANSLATE_SKELETON = ctx.skeleton
+    _TRANSLATE_ROOT = source_root
+    region = ctx.region
+    return {
+        "source_root": source_root,
+        "region": {
+            "scope": region.scope,
+            "in_region_symbols": len(region.symbols),
+            "boundary_stubs": [dataclasses.asdict(b) for b in region.boundary_stubs],
+            "intra_region_call_edges": len(region.call_edges),
+            "intra_region_dataflow_edges": len(region.dataflow_edges),
+        },
+        "worksheet": dataclasses.asdict(ctx.abstraction),
+        "contract_hints": {sid: dataclasses.asdict(h) for sid, h in ctx.contracts.items()},
+        "flow_candidates": [dataclasses.asdict(f) for f in ctx.flows],
+        "next_step": (
+            "Author this region now via propose_component / propose_edge: group "
+            "symbols by responsibility (never 1:1 with functions), name erased "
+            "contracts, anchor every node to real locations, wire FLOW from the "
+            "candidates. Then call translate_coverage() to see what remains."
+        ),
+    }
+
+
+@mcp.tool()
+def translate_coverage() -> dict:
+    """The resume/progress query: which skeleton symbols are not yet covered by
+    any authored node, grouped by module. An empty report (is_complete=True)
+    means every region is done. Requires a cached skeleton (translate_prepare).
+
+    Returns {by_module, total_uncovered, total_leaf, covered, is_complete}."""
+    if GRAPH is None:
+        return _no_active()
+    if _TRANSLATE_SKELETON is None:
+        return _no_skeleton()
+    return dataclasses.asdict(_lift.coverage_tracker(GRAPH, _TRANSLATE_SKELETON))
+
+
+@mcp.tool()
+def translate_stitch() -> dict:
+    """Once coverage is empty, surface skeleton call/dataflow edges whose endpoint
+    symbols were anchored in different authored subtrees -- cross-region edge
+    candidates for the operator to confirm as REFERENCE or FLOW. Requires a
+    cached skeleton (translate_prepare).
+
+    Returns {"stitch_candidates": [{from_symbol, to_symbol, from_component,
+    to_component, from_root, to_root, kind, suggested_edge_type}]}."""
+    if GRAPH is None:
+        return _no_active()
+    if _TRANSLATE_SKELETON is None:
+        return _no_skeleton()
+    candidates = _lift.stitch_reconciler(GRAPH, _TRANSLATE_SKELETON)
+    return {"stitch_candidates": [dataclasses.asdict(s) for s in candidates]}
+
+
+@mcp.tool()
+def translate_verify() -> dict:
+    """Audit the authored graph against the cached skeleton: a trust report with
+    anchor / coverage / contract / grounding findings and an overall trust score.
+    Requires a cached skeleton (translate_prepare).
+
+    Returns {trust_score, trust_breakdown, anchor_findings, coverage_findings,
+    contract_findings, grounding_findings}. The graph and skeleton themselves are
+    omitted from the response (the operator already holds the graph)."""
+    if GRAPH is None:
+        return _no_active()
+    if _TRANSLATE_SKELETON is None:
+        return _no_skeleton()
+    vm = _verifylib.verify(GRAPH, _TRANSLATE_SKELETON)
+    return {
+        "trust_score": vm.trust_score,
+        "trust_breakdown": vm.trust_breakdown,
+        "anchor_findings": [dataclasses.asdict(f) for f in vm.anchor_findings],
+        "coverage_findings": [dataclasses.asdict(f) for f in vm.coverage_findings],
+        "contract_findings": [dataclasses.asdict(f) for f in vm.contract_findings],
+        "grounding_findings": [dataclasses.asdict(f) for f in vm.grounding_findings],
+    }
 
 
 # ===========================================================================
@@ -857,6 +1193,44 @@ def armature_plan() -> str:
         "    Work only within its contract. Treat the rest of the graph as invisible.\n"
         "    Entry children must cover parent input types. Exit children must cover output types.\n\n"
         "After each write: check the returned warning count. Call get_active_warnings if nonzero.\n\n"
+        + _WRITE_DISCIPLINE
+    )
+
+
+@mcp.prompt()
+def armature_translate() -> str:
+    """Translation mode: annotate a codebase and commit it as an Armature graph."""
+    return (
+        "You are TRANSLATING a codebase into an Armature graph. The skeleton is\n"
+        "mechanical ground truth; YOU make every semantic judgment and author the\n"
+        "graph by hand via propose_component / propose_edge. The translate_* tools\n"
+        "only surface evidence and track progress -- they never write to the graph.\n\n"
+        "Open or create the target graph first (open_graph / new_graph). Then run\n"
+        "the recursive, scope-bounded protocol -- progress lives in the GRAPH, so\n"
+        "any step can be resumed in a fresh session:\n\n"
+        "  1. TOP PASS -- translate_prepare(root)  (scope=None, whole codebase)\n"
+        "     Read the worksheet (clusters, entrypoints, fan-in hubs) and author the\n"
+        "     handful of z=0 SUBSYSTEMS plus the FLOW edges between them. Do not\n"
+        "     descend yet -- these roots define the subtrees regions will fill.\n\n"
+        "  2. REGION PASSES -- translate_prepare(root, scope='subdir/') per region\n"
+        "     For each region (a subdir prefix): group symbols BY RESPONSIBILITY --\n"
+        "     never 1:1 with functions. Name erased contracts where a hint has\n"
+        "     needs_naming=True (dict/primitive I/O). Wire FLOW from the flow\n"
+        "     candidates, and hand-wire the blind-spot flags. Anchor EVERY node to\n"
+        "     real file locations.\n\n"
+        "  3. COVERAGE LOOP -- translate_coverage()\n"
+        "     Lists uncovered symbols by module. Loop back to step 2 for the next\n"
+        "     region until is_complete=True (empty report).\n\n"
+        "  4. STITCH PASS -- translate_stitch()\n"
+        "     Surfaces call/dataflow edges whose endpoints landed in different\n"
+        "     subtrees. Confirm each as REFERENCE (calls) or FLOW (true siblings)\n"
+        "     via propose_edge. This is the only cross-region reconciliation step.\n\n"
+        "  5. VERIFY -- translate_verify()\n"
+        "     Returns the trust report (anchor/coverage/contract/grounding findings\n"
+        "     + score). Resolve findings, then re-run until clean.\n\n"
+        "Authoring rules (types as short concept strings, group by responsibility,\n"
+        "anchor everything, one component at a time) are in translator/LIFT_PROTOCOL.md\n"
+        "-- read it before authoring.\n\n"
         + _WRITE_DISCIPLINE
     )
 

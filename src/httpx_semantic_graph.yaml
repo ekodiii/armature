@@ -1,0 +1,1776 @@
+components:
+  client:
+    component_id: client
+    description: "The public entry point for making HTTP requests. Client (sync) and\
+      \ AsyncClient manage lifecycle (open/close), merge per-request overrides with\
+      \ client-level defaults, and orchestrate the full send pipeline. The thin get/post/put/\u2026\
+      \ verbs are convenience wrappers that delegate immediately to request() \u2192\
+      \ send()."
+    processing: Accept user-supplied method, URL, headers, cookies, auth, timeout,
+      follow_redirects. Merge with client defaults (base_url, default headers/cookies/params).
+      Build a Request object, then invoke send(); buffer the full body unless stream=True.
+    input_types:
+    - RequestParams
+    output_types:
+    - Response
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 594
+      end_line: 1304
+  request_builder:
+    component_id: request_builder
+    description: Constructs a fully-formed Request object from user inputs. Merges
+      URL (with base_url and query params), headers, cookies, and selects the right
+      content encoder for the body (raw bytes, urlencoded form, multipart, JSON).
+      The output is an immutable snapshot ready to be handed to the auth/transport
+      layer.
+    processing: Merge base_url + relative URL + per-request params. Merge client headers
+      + per-request headers. Merge client cookies + per-request cookies. Invoke encode_request()
+      to pick ByteStream/IteratorByteStream/MultipartStream/JSON body, set Content-Type
+      and Content-Length headers accordingly.
+    input_types:
+    - RequestParams
+    - ClientDefaults
+    output_types:
+    - Request
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 340
+      end_line: 443
+    - path: _models.py
+      start_line: 382
+      end_line: 511
+    - path: _content.py
+      start_line: 107
+      end_line: 219
+  auth_handler:
+    component_id: auth_handler
+    description: Drives the authentication coroutine protocol. Auth is a generator
+      that yields Request objects and receives Response objects back, enabling multi-round-trip
+      schemes (Digest, OAuth challenge-response). The client drives the generator
+      loop, re-sending requests until the auth flow is exhausted.
+    processing: "Resolve auth: client default \u2192 per-request override. Call auth.sync_auth_flow(request)\
+      \ / async_auth_flow(request). Drive the generator: yield Request, receive Response,\
+      \ repeat until StopIteration. Supports BasicAuth (single round), DigestAuth\
+      \ (challenge-response), NetRCAuth, and arbitrary user-defined Auth subclasses."
+    input_types:
+    - Request
+    - Auth
+    output_types:
+    - Request
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _auth.py
+      start_line: 22
+      end_line: 348
+    - path: _client.py
+      start_line: 445
+      end_line: 473
+    - path: _client.py
+      start_line: 930
+      end_line: 963
+  redirect_handler:
+    component_id: redirect_handler
+    description: Handles HTTP redirect chains. After each response, inspects Location
+      header; if present and follow_redirects=True, builds a new Request (potentially
+      changing method, stripping sensitive headers, preserving or dropping the body
+      per RFC 7231). Guards against redirect loops and max_redirects exhaustion. Fires
+      request/response event hooks around each hop.
+    processing: 'Loop: fire request hooks, dispatch via transport, fire response hooks.
+      If response has redirect location: call _build_redirect_request (new URL, method
+      coercion GET on 301/302/303, header scrubbing), append to history, repeat. Return
+      first non-redirect Response or raise TooManyRedirects.'
+    input_types:
+    - Request
+    output_types:
+    - Response
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 475
+      end_line: 591
+    - path: _client.py
+      start_line: 964
+      end_line: 1000
+  transport_layer:
+    component_id: transport_layer
+    description: Bridges httpx's domain model to the underlying httpcore connection
+      pool. Translates a httpx.Request into an httpcore.Request (raw bytes, URL struct),
+      delegates to httpcore's ConnectionPool/HTTPProxy/SOCKSProxy, and wraps the raw
+      response stream back into a httpx.Response with a lazy ResponseStream. Also
+      hosts WSGI/ASGI in-process transports for testing.
+    processing: "Select transport for URL via proxy map. Convert httpx.Request fields\
+      \ (method, URL parts, headers.raw, stream) to httpcore.Request. Call pool.handle_request().\
+      \ Wrap response: httpcore status/headers \u2192 Response(stream=ResponseStream(resp.stream)).\
+      \ Map httpcore exceptions \u2192 httpx transport exceptions."
+    input_types:
+    - Request
+    output_types:
+    - Response
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _transports/base.py
+      start_line: 14
+      end_line: 86
+    - path: _transports/default.py
+      start_line: 135
+      end_line: 406
+    - path: _transports/wsgi.py
+      start_line: 44
+      end_line: 149
+    - path: _transports/asgi.py
+      start_line: 63
+      end_line: 187
+  response_model:
+    component_id: response_model
+    description: The rich Response object that the user interacts with. Provides lazy
+      and eager body access (.content, .text, .json(), .iter_bytes()), content-encoding
+      decoding (gzip, deflate, brotli, zstd), decoded text with charset detection/fallback,
+      streaming iterators, and elapsed timing. Cookie extraction into the client jar
+      also happens here.
+    processing: 'Wrap raw SyncByteStream/AsyncByteStream from transport. On .read():
+      drain stream through ContentDecoder chain, cache as _content. Expose .text via
+      charset decode (from Content-Type or chardet fallback). Expose .json() via json.loads(_content).
+      Track is_stream_consumed / is_closed. BoundSyncStream / BoundAsyncStream record
+      elapsed on first byte.'
+    input_types:
+    - Response
+    output_types:
+    - DecodedResponse
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _models.py
+      start_line: 515
+      end_line: 1076
+    - path: _decoders.py
+      start_line: 36
+      end_line: 378
+    - path: _client.py
+      start_line: 139
+      end_line: 182
+  url_subsystem:
+    component_id: url_subsystem
+    description: httpx's URL and query-parameter abstraction. URL wraps a parsed RFC
+      3986 structure (scheme, host, port, path, query, fragment) with convenience
+      properties and immutable copy-with-change semantics. QueryParams is a multi-value
+      ordered mapping for building/merging query strings. The underlying _urlparse
+      module handles the RFC 3986 parsing state machine.
+    processing: Parse URL string via _urlparse.ParseResult. Validate scheme/host.
+      Expose typed properties (host, port, path, query, netloc, raw_* bytes). URL.copy_with()
+      returns a new URL with patched fields. QueryParams merges dicts/lists, serialises
+      to percent-encoded query string.
+    input_types:
+    - URLString
+    output_types:
+    - URL
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _urls.py
+      start_line: 15
+      end_line: 641
+    - path: _urlparse.py
+      start_line: 1
+      end_line: 210
+  headers_cookies:
+    component_id: headers_cookies
+    description: Headers and Cookies as first-class domain objects. Headers is a case-insensitive,
+      multi-value ordered mapping over raw bytes pairs with encoding-aware string
+      access. Cookies wraps http.cookiejar to extract Set-Cookie from responses, inject
+      Cookie headers into requests, and support domain/path scoping. Both are mutable
+      for client-level defaults and mergeable per-request.
+    processing: 'Headers: store as list of (bytes, bytes) pairs; case-insensitive
+      lookup via lower-cased index; encode/decode with configurable charset. Cookies:
+      extract_cookies(response) runs http.cookiejar; set_cookie_header(request) injects
+      serialised Cookie header. Merging: client defaults + per-request overrides with
+      explicit None-removal semantics.'
+    input_types:
+    - HeaderTypes
+    - CookieTypes
+    output_types:
+    - Headers
+    - Cookies
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _models.py
+      start_line: 139
+      end_line: 381
+    - path: _models.py
+      start_line: 1079
+      end_line: 1277
+  config_subsystem:
+    component_id: config_subsystem
+    description: "Client configuration value objects: Timeout (connect/read/write/pool\
+      \ per-phase timeouts), Limits (max_connections, max_keepalive_connections, keepalive_expiry),\
+      \ Proxy (URL + optional auth + SSL context for CONNECT tunnels), and SSL context\
+      \ construction. These are frozen data carriers \u2014 no logic beyond validation\
+      \ and the factory create_ssl_context()."
+    processing: "Timeout: normalize scalar \u2192 per-phase dict; support UNSET sentinel\
+      \ for \"use default\". Limits: validate positive integers. Proxy: parse proxy\
+      \ URL, extract auth credentials, optionally configure proxy-side SSL. create_ssl_context():\
+      \ load certifi CA bundle or user-supplied CA file/dir; optionally load client\
+      \ cert."
+    input_types:
+    - ConfigParams
+    output_types:
+    - Timeout
+    - Limits
+    - Proxy
+    - SSLContext
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _config.py
+      start_line: 16
+      end_line: 243
+  content_encoding:
+    component_id: content_encoding
+    description: 'Request body encoding and response body decoding. On the request
+      side: encode_request() routes content/data/files/json to the correct encoder
+      (ByteStream, IteratorByteStream, MultipartStream, url-encoded). On the response
+      side: a chain of ContentDecoder objects (gzip, deflate, brotli, zstd, identity)
+      is selected from the Content-Encoding header and streamed through to produce
+      raw bytes.'
+    processing: "Request encoding: inspect content type \u2192 dispatch to encode_content\
+      \ / encode_urlencoded_data / encode_multipart_data / encode_json; set Content-Type\
+      \ + Content-Length/Transfer-Encoding headers. Response decoding: parse Content-Encoding\
+      \ header tokens \u2192 instantiate MultiDecoder chain \u2192 decode(chunk) +\
+      \ flush(); optionally decode charset via TextDecoder/LineDecoder for streaming\
+      \ text."
+    input_types:
+    - RequestContent
+    - SyncByteStream
+    output_types:
+    - SyncByteStream
+    - bytes
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _content.py
+      start_line: 31
+      end_line: 241
+    - path: _decoders.py
+      start_line: 36
+      end_line: 378
+    - path: _multipart.py
+      start_line: 70
+      end_line: 300
+  exceptions:
+    component_id: exceptions
+    description: 'httpx''s typed exception hierarchy. Three root families: HTTPStatusError
+      (non-2xx response with request+response attached), RequestError (transport/network/protocol
+      failures subdivided into Timeout*, NetworkError*, ProtocolError*), and StreamError
+      (stream lifecycle violations). map_httpcore_exceptions() translates httpcore
+      exceptions into the corresponding httpx type at the transport boundary.'
+    processing: Exception classes carry request and/or response references. map_httpcore_exceptions()
+      is a context manager that catches httpcore exception types and re-raises as
+      the matching httpx subclass, preserving __cause__. response.raise_for_status()
+      raises HTTPStatusError when status >= 400.
+    input_types:
+    - HTTPCoreException
+    - StatusCode
+    output_types:
+    - HTTPError
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _exceptions.py
+      start_line: 74
+      end_line: 363
+  ext_httpcore:
+    component_id: ext_httpcore
+    description: "httpcore \u2014 the low-level HTTP/1.1 and HTTP/2 connection pool\
+      \ library that httpx delegates all actual network I/O to. Manages connection\
+      \ lifecycle, keep-alive, pipelining, H2 multiplexing, proxy tunneling, and SOCKS.\
+      \ httpx never opens sockets directly."
+    processing: 'ConnectionPool.handle_request(): acquire connection from pool, send
+      raw HTTP/1.1 or HTTP/2 frames, return raw response stream. HTTPProxy / SOCKSProxy:
+      establish tunnel then hand off to pool.'
+    input_types:
+    - httpcore.Request
+    output_types:
+    - httpcore.Response
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations: []
+  ext_network:
+    component_id: ext_network
+    description: "The OS network stack and DNS resolver \u2014 TCP/TLS sockets opened\
+      \ by httpcore. httpx has no visibility into or control over this layer."
+    processing: TCP connect + TLS handshake + send/recv bytes.
+    input_types:
+    - TCPConnection
+    output_types:
+    - RawBytes
+    z_level: 0
+    external: true
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations: []
+  public_api:
+    component_id: public_api
+    description: Module-level convenience functions (httpx.get, httpx.post, etc.)
+      and the command-line interface (_main.py). Each top-level function instantiates
+      a one-shot Client, calls the corresponding method, and closes it. The CLI uses
+      the same path with rich output formatting.
+    processing: "httpx.get(url, **kwargs) \u2192 Client().get(url, **kwargs). httpx.request()\
+      \ \u2192 Client().request(). CLI: parse args (method, url, headers, data, json\
+      \ flags) \u2192 call request() \u2192 pretty-print status/headers/body."
+    input_types:
+    - CLIArgs
+    - RequestParams
+    output_types:
+    - Response
+    z_level: 0
+    external: false
+    parent_id: null
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _api.py
+      start_line: 1
+      end_line: 200
+    - path: _main.py
+      start_line: 1
+      end_line: 200
+  client.lifecycle:
+    component_id: client.lifecycle
+    description: Manages the Client's open/closed state machine and connection lifecycle.
+      Enforces that requests cannot be sent to a closed client, supports context-manager
+      usage (__enter__/__exit__, __aenter__/__aexit__), and delegates transport close()/aclose()
+      on exit.
+    processing: "ClientState enum (UNOPENED \u2192 OPENED \u2192 CLOSED). __enter__\
+      \ returns self; __exit__ calls self.close() which calls transport.close(). Raises\
+      \ RuntimeError if send() called on CLOSED client."
+    input_types:
+    - ClientState
+    output_types:
+    - ClientState
+    z_level: 1
+    external: false
+    parent_id: client
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 125
+      end_line: 136
+    - path: _client.py
+      start_line: 1263
+      end_line: 1304
+  client.send_pipeline:
+    component_id: client.send_pipeline
+    description: "The send() method \u2014 the central dispatch point after a Request\
+      \ is built. Resolves auth (UseClientDefault sentinel \u2192 client auth), calls\
+      \ _set_timeout on the request, then enters the auth\u2192redirect\u2192transport\
+      \ loop. After the loop, reads the full body unless stream=True; closes on any\
+      \ exception."
+    processing: "1. Guard: client not CLOSED. 2. Resolve follow_redirects sentinel.\
+      \ 3. _set_timeout(request) \u2014 writes timeout extension onto request. 4.\
+      \ _build_request_auth(request, auth) \u2192 Auth instance. 5. Call _send_handling_auth\
+      \ \u2192 Response. 6. If not stream: response.read(). Return Response or re-raise\
+      \ after response.close()."
+    input_types:
+    - Request
+    - Auth
+    - bool
+    output_types:
+    - Response
+    z_level: 1
+    external: false
+    parent_id: client
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 879
+      end_line: 929
+  client.transport_selection:
+    component_id: client.transport_selection
+    description: Selects which transport instance to use for a given URL. Checks proxy
+      map for URL pattern matches in URLPattern-sorted order (longest-match wins).
+      Returns the proxy transport for matching URLs or the default transport for everything
+      else. Also initialises HTTPTransport/AsyncHTTPTransport from Limits/SSL config
+      at construction.
+    processing: '_transport_for_url(url): iterate sorted proxy_map (URLPattern keys);
+      first match wins. _init_transport() / _init_proxy_transport(): create HTTPTransport
+      with ssl_context, limits, http1/http2 flags. URLPattern precedence: https >
+      http > all.'
+    input_types:
+    - URL
+    output_types:
+    - BaseTransport
+    z_level: 1
+    external: false
+    parent_id: client
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 718
+      end_line: 769
+    - path: _utils.py
+      start_line: 120
+      end_line: 226
+  client.event_hooks:
+    component_id: client.event_hooks
+    description: Pluggable request/response event hook lists. Hooks are called in
+      order, synchronously, around each individual request dispatch (before sending,
+      after receiving). Enables logging, metrics, request mutation, and response inspection
+      without subclassing.
+    processing: '_event_hooks dict with ''request'' and ''response'' lists. In redirect_handler
+      loop: for hook in _event_hooks[''request'']: hook(request); for hook in _event_hooks[''response'']:
+      hook(response). AsyncClient uses async hooks (await hook(request)).'
+    input_types:
+    - Request
+    - Response
+    output_types:
+    - Request
+    - Response
+    z_level: 1
+    external: false
+    parent_id: client
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 262
+      end_line: 272
+  request_builder.url_merge:
+    component_id: request_builder.url_merge
+    description: 'Merges a per-request URL with the client''s base_url and default
+      query params. base_url is prepended only for relative URLs. Query params are
+      merged: client defaults first, then per-request params override.'
+    processing: '_merge_url(url): URL(base_url).copy_with(raw_path=base_path + request_path).
+      _merge_queryparams(params): QueryParams(client_params).merge(request_params).
+      Both return new immutable URL / QueryParams.'
+    input_types:
+    - URLString
+    - QueryParams
+    output_types:
+    - URL
+    z_level: 1
+    external: false
+    parent_id: request_builder
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 391
+      end_line: 443
+  request_builder.body_encoder:
+    component_id: request_builder.body_encoder
+    description: "Selects and instantiates the correct body stream type from user-supplied\
+      \ content arguments. Routes: raw bytes/str \u2192 ByteStream; Iterable[bytes]\
+      \ \u2192 IteratorByteStream (chunked); AsyncIterable \u2192 AsyncIteratorByteStream;\
+      \ dict data \u2192 ByteStream (url-encoded); files \u2192 MultipartStream; Any\
+      \ json \u2192 ByteStream (JSON-encoded). Also derives Content-Type and Content-Length/Transfer-Encoding\
+      \ headers."
+    processing: "encode_request() dispatcher: checks content, files, data, json in\
+      \ priority order. encode_content(): bytes \u2192 ByteStream, iterable \u2192\
+      \ IteratorByteStream with peek_filelike_length. encode_urlencoded_data(): urlencode\
+      \ dict. encode_multipart_data(): MultipartStream with MIME boundary. encode_json():\
+      \ json.dumps with no whitespace."
+    input_types:
+    - RequestContent
+    - RequestData
+    - RequestFiles
+    output_types:
+    - SyncByteStream
+    - Headers
+    z_level: 1
+    external: false
+    parent_id: request_builder
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _content.py
+      start_line: 107
+      end_line: 219
+    - path: _multipart.py
+      start_line: 70
+      end_line: 300
+  request_builder.header_merge:
+    component_id: request_builder.header_merge
+    description: 'Merges client-level default headers with per-request headers, then
+      injects auto-headers (Host, Content-Length: 0 for POST/PUT/PATCH with no body).
+      Explicit per-request values always win. Handles Transfer-Encoding vs Content-Length
+      precedence: if Content-Length explicitly set, Transfer-Encoding: chunked is
+      suppressed.'
+    processing: '_merge_headers: client.headers + request headers list. Request._prepare(default_headers):
+      setdefault each encoder-derived header, then prepend auto Host + Content-Length:
+      0 if needed. All stored as list of (bytes, bytes) for order preservation.'
+    input_types:
+    - HeaderTypes
+    - HeaderTypes
+    output_types:
+    - Headers
+    z_level: 1
+    external: false
+    parent_id: request_builder
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 424
+      end_line: 432
+    - path: _models.py
+      start_line: 441
+      end_line: 460
+  auth_handler.basic:
+    component_id: auth_handler.basic
+    description: "HTTP Basic Authentication \u2014 adds a single Authorization: Basic\
+      \ base64(user:pass) header before the first request. One round trip, no server\
+      \ challenge needed. Reads credentials from constructor args or netrc file (NetRCAuth)."
+    processing: 'BasicAuth.auth_flow(): yield request.merge_headers({''Authorization'':
+      ''Basic '' + b64encode(f''{user}:{pass}''.encode())}). NetRCAuth.auth_flow():
+      look up host in ~/.netrc, same encoding.'
+    input_types:
+    - Request
+    output_types:
+    - Request
+    z_level: 1
+    external: false
+    parent_id: auth_handler
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _auth.py
+      start_line: 126
+      end_line: 172
+  auth_handler.digest:
+    component_id: auth_handler.digest
+    description: "HTTP Digest Authentication \u2014 a challenge-response scheme requiring\
+      \ two round trips. First sends the request unauthenticated, receives a 401 with\
+      \ WWW-Authenticate: Digest header, parses the challenge (realm, nonce, qop,\
+      \ algorithm), computes HA1/HA2/response hashes, then re-sends with Authorization\
+      \ header containing the computed digest."
+    processing: 'Round 1: yield request unmodified, receive 401 response. Parse WWW-Authenticate
+      into _DigestAuthChallenge (realm, nonce, qop, opaque, algorithm). Round 2: compute
+      HA1 = MD5/SHA(user:realm:pass), HA2 = MD5/SHA(method:uri), response = MD5/SHA(HA1:nonce:nc:cnonce:qop:HA2).
+      Yield new request with Authorization: Digest header.'
+    input_types:
+    - Request
+    output_types:
+    - Request
+    z_level: 1
+    external: false
+    parent_id: auth_handler
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _auth.py
+      start_line: 175
+      end_line: 348
+  auth_handler.flow_protocol:
+    component_id: auth_handler.flow_protocol
+    description: "The generator-coroutine protocol that drives any Auth subclass synchronously\
+      \ or asynchronously. Separates the auth dispatch loop from the auth logic \u2014\
+      \ the Auth base class provides sync_auth_flow / async_auth_flow which wrap auth_flow(),\
+      \ handling requires_request_body and requires_response_body flags to eagerly\
+      \ buffer bodies when the auth scheme needs to inspect them."
+    processing: "Auth.sync_auth_flow(request): if requires_request_body \u2192 request.read().\
+      \ Drive auth_flow generator: next(flow) \u2192 yield request to client; on send(response),\
+      \ if requires_response_body \u2192 response.read(); send to flow. StopIteration\
+      \ ends loop. async_auth_flow mirrors with await."
+    input_types:
+    - Request
+    - Response
+    output_types:
+    - Request
+    z_level: 1
+    external: false
+    parent_id: auth_handler
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _auth.py
+      start_line: 22
+      end_line: 125
+  redirect_handler.dispatch_loop:
+    component_id: redirect_handler.dispatch_loop
+    description: 'The inner loop that fires event hooks and dispatches each individual
+      request to the transport. Sits inside the redirect chain: fire request hooks,
+      call _send_single_request (transport dispatch), fire response hooks, check for
+      redirect. This is the only place transport.handle_request() is actually called.'
+    processing: "Loop: fire request event hooks; call _send_single_request(request)\
+      \ \u2192 transport.handle_request() \u2192 Response; fire response event hooks;\
+      \ attach history. If response.has_redirect_location and follow_redirects: read\
+      \ response body, build redirect request, continue. Else return."
+    input_types:
+    - Request
+    output_types:
+    - Response
+    z_level: 1
+    external: false
+    parent_id: redirect_handler
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 964
+      end_line: 1035
+  redirect_handler.request_rewriter:
+    component_id: redirect_handler.request_rewriter
+    description: "Builds the next Request for a redirect. Implements RFC 7231 redirect\
+      \ semantics: coerce POST\u2192GET on 301/302/303 (unless already HEAD/GET),\
+      \ preserve method on 307/308. Strip Authorization and proxy headers if crossing\
+      \ origins. Drop request body on method change. Recompute URL from Location header\
+      \ (absolute or relative-to-current)."
+    processing: "_build_redirect_request(request, response): get new URL via _redirect_url.\
+      \ _redirect_method: 301/302/303 + POST \u2192 GET. _redirect_headers: strip\
+      \ Authorization if origin changed, always strip Proxy-Authorization. _redirect_stream:\
+      \ None if method changed to GET, else preserve original stream."
+    input_types:
+    - Request
+    - Response
+    output_types:
+    - Request
+    z_level: 1
+    external: false
+    parent_id: redirect_handler
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 475
+      end_line: 582
+  transport_layer.http_transport:
+    component_id: transport_layer.http_transport
+    description: "The standard HTTP transport wrapping an httpcore.ConnectionPool.\
+      \ Translates httpx.Request \u2192 httpcore.Request (raw bytes fields), calls\
+      \ pool.handle_request(), wraps the raw response stream in a ResponseStream adapter,\
+      \ and maps httpcore exceptions to httpx types. Supports HTTP/1.1, HTTP/2, proxy,\
+      \ SOCKS, UDS, local address binding, and retries \u2014 all delegated to httpcore."
+    processing: 'HTTPTransport.__init__: create httpcore.ConnectionPool / HTTPProxy
+      / SOCKSProxy from Limits+SSL. handle_request(): build httpcore.Request with
+      raw scheme/host/port/target bytes; pool.handle_request(req); return Response(status,
+      headers, stream=ResponseStream(resp.stream)). map_httpcore_exceptions() context
+      manager on pool call.'
+    input_types:
+    - Request
+    output_types:
+    - Response
+    z_level: 1
+    external: false
+    parent_id: transport_layer
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _transports/default.py
+      start_line: 121
+      end_line: 262
+  transport_layer.async_transport:
+    component_id: transport_layer.async_transport
+    description: 'Async counterpart to HTTPTransport, wrapping httpcore.AsyncConnectionPool.
+      Identical structure but all I/O is async: handle_async_request(), AsyncResponseStream,
+      async context manager. Used exclusively by AsyncClient.'
+    processing: 'AsyncHTTPTransport.handle_async_request(): await pool.handle_async_request(req);
+      wrap with AsyncResponseStream. aclose(): await pool.aclose(). Same httpcore
+      exception mapping.'
+    input_types:
+    - Request
+    output_types:
+    - Response
+    z_level: 1
+    external: false
+    parent_id: transport_layer
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _transports/default.py
+      start_line: 265
+      end_line: 406
+  transport_layer.wsgi_asgi:
+    component_id: transport_layer.wsgi_asgi
+    description: In-process transports for testing against WSGI and ASGI apps without
+      a network. WSGITransport calls the app callable synchronously with a PEP 3333
+      environ dict and captures the response. ASGITransport calls the app as an ASGI3
+      callable with scope/receive/send coroutines. Both translate the httpx.Request
+      into the appropriate app interface and wrap the app's response back into httpx.Response.
+    processing: 'WSGITransport.handle_request(): build environ from request (REQUEST_METHOD,
+      PATH_INFO, wsgi.input=BytesIO(content), etc.); call app(environ, start_response);
+      yield response chunks via WSGIByteStream. ASGITransport.handle_async_request():
+      build ASGI scope dict; drive receive/send coroutine protocol; collect body chunks.'
+    input_types:
+    - Request
+    output_types:
+    - Response
+    z_level: 1
+    external: false
+    parent_id: transport_layer
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _transports/wsgi.py
+      start_line: 44
+      end_line: 149
+    - path: _transports/asgi.py
+      start_line: 63
+      end_line: 187
+  response_model.stream_reader:
+    component_id: response_model.stream_reader
+    description: Controls body buffering and streaming lifecycle. Implements iter_bytes(),
+      iter_raw(), read(), aread() against the underlying SyncByteStream or AsyncByteStream.
+      BoundSyncStream/BoundAsyncStream wrap the transport stream to record elapsed
+      time on first byte and close the stream when the response is closed. Guards
+      against double-consumption (is_stream_consumed) and use-after-close (is_closed).
+    processing: 'read(): drain stream into _content bytes cache; replace stream with
+      ByteStream(_content) for replayability. iter_bytes(chunk_size): yield decoded
+      chunks without full buffering. BoundSyncStream.__iter__: call stream, on first
+      chunk record start time; on StopIteration set response.elapsed. is_stream_consumed
+      / is_closed guards raise StreamConsumed / StreamClosed.'
+    input_types:
+    - SyncByteStream
+    output_types:
+    - bytes
+    z_level: 1
+    external: false
+    parent_id: response_model
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 139
+      end_line: 182
+    - path: _models.py
+      start_line: 700
+      end_line: 850
+  response_model.content_decoder_chain:
+    component_id: response_model.content_decoder_chain
+    description: "Selects and chains ContentDecoder instances from the Content-Encoding\
+      \ response header. Builds a decode pipeline: e.g. Content-Encoding: gzip, br\
+      \ \u2192 [BrotliDecoder, GZipDecoder] applied right-to-left. Each decoder implements\
+      \ decode(chunk) + flush(). MultiDecoder composes multiple decoders. Optional\
+      \ TextDecoder/LineDecoder layer for charset-aware text streaming."
+    processing: "Parse Content-Encoding tokens. Map token \u2192 decoder class: gzip/x-gzip\
+      \ \u2192 GZipDecoder, deflate \u2192 DeflateDecoder, br \u2192 BrotliDecoder,\
+      \ zstd \u2192 ZStandardDecoder, identity \u2192 IdentityDecoder. Multiple tokens\
+      \ \u2192 MultiDecoder([d1, d2, ...]). For streaming text: TextChunker wraps\
+      \ decoded bytes with charset detection via chardet/default_encoding."
+    input_types:
+    - bytes
+    - Headers
+    output_types:
+    - bytes
+    z_level: 1
+    external: false
+    parent_id: response_model
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _decoders.py
+      start_line: 36
+      end_line: 378
+    - path: _models.py
+      start_line: 850
+      end_line: 950
+  response_model.text_json:
+    component_id: response_model.text_json
+    description: Text and JSON decoding layer on top of raw bytes. .text decodes _content
+      using the charset from Content-Type header, falling back to chardet auto-detection,
+      then default_encoding. .json() calls json.loads on the decoded text. .encoding
+      property exposes the resolved charset. iter_text() and iter_lines() stream decoded
+      text/lines without full buffering.
+    processing: 'charset_from_content_type(headers): parse charset= param from Content-Type.
+      If absent: chardet.detect(_content). .text = _content.decode(encoding, errors=''replace'').
+      .json() = json.loads(text). iter_lines(): wrap iter_text() through LineDecoder
+      which buffers partial lines across chunks.'
+    input_types:
+    - bytes
+    - Headers
+    output_types:
+    - str
+    - Any
+    z_level: 1
+    external: false
+    parent_id: response_model
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _models.py
+      start_line: 679
+      end_line: 730
+    - path: _decoders.py
+      start_line: 306
+      end_line: 378
+  url_subsystem.parser:
+    component_id: url_subsystem.parser
+    description: RFC 3986 URL parsing state machine. Produces a ParseResult with raw
+      bytes for scheme, userinfo, host, port, path, query, fragment. Handles percent-encoding
+      normalization, IPv6 literal brackets, and default port elision. Used by URL.__init__
+      to avoid delegating to urllib.parse (which has different normalization semantics).
+    processing: '_urlparse.py ParseResult: regex-based parse into named groups. normalize_url():
+      lowercase scheme and host, remove default ports (80/443), percent-encode reserved
+      chars in path. Returns ParseResult with raw_* byte attributes and decoded string
+      properties.'
+    input_types:
+    - URLString
+    output_types:
+    - ParseResult
+    z_level: 1
+    external: false
+    parent_id: url_subsystem
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _urlparse.py
+      start_line: 1
+      end_line: 210
+  url_subsystem.query_params:
+    component_id: url_subsystem.query_params
+    description: "QueryParams \u2014 an ordered, multi-value mapping for HTTP query\
+      \ strings. Supports construction from dicts, lists of pairs, and strings. Provides\
+      \ merge(), add(), remove(), set() returning new instances (immutable semantics).\
+      \ Serialises to percent-encoded query string for inclusion in URLs."
+    processing: "Internal repr: list of (str, str) pairs. get(key) \u2192 first value;\
+      \ getlist(key) \u2192 all values. merge(other): overlay other's keys. __str__:\
+      \ urlencode(pairs, doseq=False). Used by URL.copy_with(params=...) and client\
+      \ _merge_queryparams."
+    input_types:
+    - QueryParamTypes
+    output_types:
+    - QueryParams
+    z_level: 1
+    external: false
+    parent_id: url_subsystem
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _urls.py
+      start_line: 420
+      end_line: 641
+  content_encoding.multipart:
+    component_id: content_encoding.multipart
+    description: "Multipart/form-data encoding for file uploads. Encodes a mix of\
+      \ string fields (DataField) and file fields (FileField \u2014 file object, filename,\
+      \ content-type) with a MIME boundary. MultipartStream is a SyncByteStream that\
+      \ yields boundary separators and field bodies lazily, supporting large file\
+      \ uploads without full memory buffering. Computes Content-Length by summing\
+      \ field sizes when all sizes are known; uses chunked transfer otherwise."
+    processing: 'MultipartStream(data, files, boundary): build list of DataField /
+      FileField from data dict and files dict. get_headers(): return Content-Type:
+      multipart/form-data; boundary=... and Content-Length if computable. __iter__:
+      yield --boundary, field headers, field body bytes for each field; yield --boundary--
+      finale.'
+    input_types:
+    - RequestData
+    - RequestFiles
+    output_types:
+    - MultipartStream
+    z_level: 1
+    external: false
+    parent_id: content_encoding
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _multipart.py
+      start_line: 70
+      end_line: 300
+  content_encoding.response_decoders:
+    component_id: content_encoding.response_decoders
+    description: Concrete ContentDecoder implementations for all supported Content-Encoding
+      values. Each wraps the corresponding stdlib or optional third-party decompression
+      library. IdentityDecoder is a pass-through. DeflateDecoder handles both raw
+      deflate and zlib-wrapped deflate (auto-detected). GZipDecoder wraps zlib with
+      wbits=47. BrotliDecoder wraps brotli/brotlicffi. ZStandardDecoder wraps zstandard.
+    processing: "ContentDecoder protocol: decode(chunk: bytes) \u2192 bytes, flush()\
+      \ \u2192 bytes. DeflateDecoder: try raw inflate, fallback to zlib inflate on\
+      \ first chunk. GZipDecoder: zlib.decompressobj(wbits=47). BrotliDecoder: brotli.Decompressor().process().\
+      \ ZStandardDecoder: zstandard.ZstdDecompressor().stream_reader(). MultiDecoder:\
+      \ chain calls across decoder list."
+    input_types:
+    - bytes
+    output_types:
+    - bytes
+    z_level: 1
+    external: false
+    parent_id: content_encoding
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _decoders.py
+      start_line: 44
+      end_line: 225
+  headers_cookies.headers:
+    component_id: headers_cookies.headers
+    description: "The Headers class \u2014 a case-insensitive, multi-value ordered\
+      \ mapping stored as raw (bytes, bytes) pairs. Supports iteration, get/getlist,\
+      \ setdefault, and update. Encoding-aware: values are decoded from bytes using\
+      \ the response charset (default Latin-1 for HTTP/1.1 wire format). merge_raw_headers()\
+      \ combines two header lists for request construction."
+    processing: 'Internal: list[tuple[bytes, bytes]]. __getitem__(name): lowercase
+      comparison; raise KeyError if absent. get(name, default): first match. getlist(name):
+      all matches. __setitem__: replace all existing, append if absent. Encoding:
+      .encoding property from Content-Type charset, default ''latin-1''. Raw access
+      via .raw property.'
+    input_types:
+    - HeaderTypes
+    output_types:
+    - Headers
+    z_level: 1
+    external: false
+    parent_id: headers_cookies
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _models.py
+      start_line: 139
+      end_line: 381
+  headers_cookies.cookies:
+    component_id: headers_cookies.cookies
+    description: "The Cookies class \u2014 a dict-like cookie jar that wraps http.cookiejar.CookieJar\
+      \ for domain/path-scoped storage. extract_cookies(response) processes Set-Cookie\
+      \ headers from a response into the jar. set_cookie_header(request) serialises\
+      \ matching cookies as a Cookie: header into the request. Supports direct get/set\
+      \ with optional domain and path scoping to resolve conflicts."
+    processing: "Uses urllib.request.Request and http.cookiejar.CookieJar internally.\
+      \ extract_cookies(): jar.extract_cookies(MockResponse(response), MockRequest(request)).\
+      \ set_cookie_header(): jar.cookies_for_request() \u2192 Cookie: header string.\
+      \ CookieConflict raised when multiple cookies match same name without explicit\
+      \ domain/path."
+    input_types:
+    - Response
+    - CookieTypes
+    output_types:
+    - Cookies
+    z_level: 1
+    external: false
+    parent_id: headers_cookies
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _models.py
+      start_line: 1079
+      end_line: 1277
+  config_subsystem.timeout:
+    component_id: config_subsystem.timeout
+    description: "Timeout configuration value object. Stores per-phase timeouts: connect,\
+      \ read, write, pool (connection-pool acquire). Supports shorthand: Timeout(5.0)\
+      \ \u2192 all phases 5s; Timeout(5.0, connect=10.0) \u2192 override one phase;\
+      \ Timeout(None) \u2192 no timeouts. Written as an extension onto the Request\
+      \ object so the transport can read it."
+    processing: 'Timeout(timeout, *, connect, read, write, pool): if scalar timeout,
+      fill all UNSET phases with it. _set_timeout(request) in client: writes {''timeout'':
+      timeout} into request.extensions. httpcore reads extensions[''timeout''] dict
+      per-operation.'
+    input_types:
+    - TimeoutTypes
+    output_types:
+    - Timeout
+    z_level: 1
+    external: false
+    parent_id: config_subsystem
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _config.py
+      start_line: 72
+      end_line: 198
+  config_subsystem.ssl:
+    component_id: config_subsystem.ssl
+    description: 'SSL context construction. create_ssl_context() builds an ssl.SSLContext
+      with the correct CA bundle: uses certifi by default, honours SSL_CERT_FILE/SSL_CERT_DIR
+      env vars when trust_env=True, accepts a pre-built ssl.SSLContext passthrough.
+      Supports client certificate loading (deprecated cert= param). Proxy objects
+      also carry an optional ssl_context for the CONNECT tunnel.'
+    processing: 'verify=True: ssl.create_default_context(cafile=certifi.where()).
+      verify=False: SSLContext with CERT_NONE + check_hostname=False. verify=SSLContext:
+      passthrough. cert: ctx.load_cert_chain(). trust_env: check SSL_CERT_FILE, SSL_CERT_DIR
+      env vars first.'
+    input_types:
+    - SSLVerify
+    - CertTypes
+    output_types:
+    - SSLContext
+    z_level: 1
+    external: false
+    parent_id: config_subsystem
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _config.py
+      start_line: 23
+      end_line: 70
+    - path: _config.py
+      start_line: 201
+      end_line: 243
+  exceptions.network_errors:
+    component_id: exceptions.network_errors
+    description: "Network-level exception family: TransportError \u2192 NetworkError\
+      \ (ReadError, WriteError, ConnectError, CloseError), TimeoutException (ConnectTimeout,\
+      \ ReadTimeout, WriteTimeout, PoolTimeout), ProxyError. All carry the originating\
+      \ request. Raised by transport_layer when httpcore signals a network failure;\
+      \ mapped from httpcore's exception types by map_httpcore_exceptions()."
+    processing: "map_httpcore_exceptions() context manager: catch httpcore.TimeoutException\
+      \ \u2192 httpx.TimeoutException subclass; httpcore.NetworkError \u2192 httpx.NetworkError\
+      \ subclass; httpcore.ProxyError \u2192 httpx.ProxyError. Each wraps __cause__\
+      \ for traceability."
+    input_types:
+    - HTTPCoreException
+    output_types:
+    - TransportError
+    z_level: 1
+    external: false
+    parent_id: exceptions
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _exceptions.py
+      start_line: 123
+      end_line: 205
+    - path: _transports/default.py
+      start_line: 1
+      end_line: 120
+  exceptions.http_errors:
+    component_id: exceptions.http_errors
+    description: 'HTTP-protocol-level exception family: HTTPStatusError (non-2xx response,
+      carries both request and response), ProtocolError (LocalProtocolError for bad
+      outgoing requests, RemoteProtocolError for malformed server responses), UnsupportedProtocol,
+      InvalidURL, TooManyRedirects, DecodingError, CookieConflict. Raised by response_model
+      or client logic, not by the transport mapping layer.'
+    processing: 'response.raise_for_status(): if status_code >= 400 raise HTTPStatusError(message,
+      request=self.request, response=self). InvalidURL: raised in URL.__init__ for
+      unparseable/unsupported schemes. TooManyRedirects: raised in redirect_handler
+      when history exceeds max_redirects.'
+    input_types:
+    - StatusCode
+    - Response
+    output_types:
+    - HTTPStatusError
+    z_level: 1
+    external: false
+    parent_id: exceptions
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _exceptions.py
+      start_line: 208
+      end_line: 363
+  public_api.functional:
+    component_id: public_api.functional
+    description: "Module-level functional API: httpx.get(), httpx.post(), httpx.put(),\
+      \ httpx.patch(), httpx.delete(), httpx.head(), httpx.options(), httpx.request().\
+      \ Each creates a one-shot Client (with verify=True, no persistent cookies),\
+      \ makes a single request, closes the client, and returns the Response. Intentionally\
+      \ stateless \u2014 no cookie persistence, no connection reuse across calls."
+    processing: "Each function: with Client() as client: return client.method(url,\
+      \ **kwargs). The Client is created fresh and closed in the finally block. These\
+      \ are convenience wrappers only \u2014 all logic lives in Client."
+    input_types:
+    - RequestParams
+    output_types:
+    - Response
+    z_level: 1
+    external: false
+    parent_id: public_api
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _api.py
+      start_line: 1
+      end_line: 200
+  public_api.cli:
+    component_id: public_api.cli
+    description: Command-line interface entry point. Parses method, URL, headers (-H),
+      query params, request body (--data, --json, --files), and output flags from
+      argv. Calls httpx.request() with the parsed arguments. Pretty-prints the response
+      status line, headers, and body with syntax highlighting (via rich if available).
+      Supports --follow-redirects, --no-verify, --timeout, --http2.
+    processing: '_main.py: argparse setup. Build headers dict from -H Name:Value pairs.
+      Build content/json/data kwargs from body flags. Call client.request(method,
+      url, ...). Print HTTP/version status reason, then headers, then response.text.'
+    input_types:
+    - CLIArgs
+    output_types:
+    - Response
+    z_level: 1
+    external: false
+    parent_id: public_api
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _main.py
+      start_line: 1
+      end_line: 200
+  redirect_handler.dispatch_loop.single_request:
+    component_id: redirect_handler.dispatch_loop.single_request
+    description: "_send_single_request() \u2014 dispatches one Request to the selected\
+      \ transport with no redirect or auth logic. Selects the transport via _transport_for_url,\
+      \ verifies the stream is synchronous (guards against async stream in sync client),\
+      \ calls transport.handle_request(request), wraps the response stream in BoundSyncStream\
+      \ to capture elapsed time, extracts cookies into the client jar."
+    processing: "transport = _transport_for_url(request.url). Assert stream is SyncByteStream.\
+      \ transport.handle_request(request) \u2192 raw Response. Wrap: response.stream\
+      \ = BoundSyncStream(response.stream, response, start=perf_counter). cookies.extract_cookies(response).\
+      \ response.default_encoding = client._default_encoding. Log HTTP Request line."
+    input_types:
+    - Request
+    output_types:
+    - Response
+    z_level: 2
+    external: false
+    parent_id: redirect_handler.dispatch_loop
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 1001
+      end_line: 1035
+  redirect_handler.dispatch_loop.hook_runner:
+    component_id: redirect_handler.dispatch_loop.hook_runner
+    description: Executes the request and response event hook lists around each transport
+      dispatch. Called once per redirect hop. Request hooks fire before the transport
+      call (can mutate request), response hooks fire after (can inspect/log response).
+      Exceptions in hooks propagate out and trigger response.close().
+    processing: 'for hook in _event_hooks[''request'']: hook(request). [dispatch via
+      single_request]. for hook in _event_hooks[''response'']: hook(response). AsyncClient
+      uses: await hook(request) / await hook(response). Hook list is ordered and exhausted
+      on every hop.'
+    input_types:
+    - Request
+    - Response
+    output_types:
+    - Response
+    z_level: 2
+    external: false
+    parent_id: redirect_handler.dispatch_loop
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 964
+      end_line: 1000
+  transport_layer.http_transport.request_translator:
+    component_id: transport_layer.http_transport.request_translator
+    description: 'Translates a httpx.Request into an httpcore.Request. Extracts raw
+      bytes for each field: method (bytes), URL components (raw_scheme, raw_host,
+      port int, raw_path bytes), headers (list of raw byte pairs), content stream
+      (SyncByteStream passed through as-is), and extensions dict (carries timeout
+      config written by _set_timeout). This is the httpx/httpcore impedance matching
+      layer.'
+    processing: "httpcore.Request(method=request.method.encode(), url=httpcore.URL(scheme=raw_scheme,\
+      \ host=raw_host, port=port, target=raw_path), headers=request.headers.raw, content=request.stream,\
+      \ extensions=request.extensions). No data copies for the stream \u2014 httpcore\
+      \ reads it lazily."
+    input_types:
+    - Request
+    output_types:
+    - httpcore.Request
+    z_level: 2
+    external: false
+    parent_id: transport_layer.http_transport
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _transports/default.py
+      start_line: 230
+      end_line: 259
+  transport_layer.http_transport.response_translator:
+    component_id: transport_layer.http_transport.response_translator
+    description: Wraps an httpcore response back into an httpx.Response. Extracts
+      status code (int), headers (list of raw byte pairs), and wraps the raw response
+      stream in a ResponseStream adapter (sync) or AsyncResponseStream (async). The
+      ResponseStream is a SyncByteStream that iterates httpcore's iterable stream
+      and closes it when exhausted. Extensions (http_version, reason_phrase, network_stream)
+      are passed through for Response properties.
+    processing: 'ResponseStream(resp.stream): wraps httpcore iterable, __iter__ yields
+      chunks, close() calls resp.stream.close(). Return httpx.Response(status_code=resp.status,
+      headers=resp.headers, stream=ResponseStream(resp.stream), extensions=resp.extensions).'
+    input_types:
+    - httpcore.Response
+    output_types:
+    - Response
+    z_level: 2
+    external: false
+    parent_id: transport_layer.http_transport
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _transports/default.py
+      start_line: 121
+      end_line: 135
+    - path: _transports/default.py
+      start_line: 249
+      end_line: 262
+  transport_layer.http_transport.pool:
+    component_id: transport_layer.http_transport.pool
+    description: "The httpcore.ConnectionPool (or HTTPProxy/SOCKSProxy) instance owned\
+      \ by HTTPTransport. Manages connection reuse, TLS, HTTP/1.1 keep-alive, HTTP/2\
+      \ multiplexing, retries, and proxy tunneling. Created once at Client init from\
+      \ Limits + SSLContext config. HTTPTransport is just a thin adapter \u2014 all\
+      \ connection intelligence lives here."
+    processing: "httpcore.ConnectionPool(ssl_context, max_connections, max_keepalive_connections,\
+      \ keepalive_expiry, http1, http2, uds, local_address, retries, socket_options).\
+      \ pool.handle_request(req) \u2192 resp. pool.close() releases all connections.\
+      \ Proxy variants: HTTPProxy adds proxy_url/proxy_auth; SOCKSProxy requires socksio."
+    input_types:
+    - httpcore.Request
+    output_types:
+    - httpcore.Response
+    z_level: 2
+    external: true
+    parent_id: transport_layer.http_transport
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _transports/default.py
+      start_line: 135
+      end_line: 215
+  auth_handler.flow_protocol.body_buffer:
+    component_id: auth_handler.flow_protocol.body_buffer
+    description: Handles eager body buffering for auth schemes that need to inspect
+      or sign request/response bodies before sending. When Auth.requires_request_body=True,
+      reads the entire request stream into memory before starting the auth flow (needed
+      e.g. for HMAC signing). When Auth.requires_response_body=True, reads the response
+      before sending it back into the auth generator (needed for Digest with body-based
+      qop).
+    processing: "sync_auth_flow: if requires_request_body \u2192 request.read() \u2192\
+      \ ByteStream replaces stream (idempotent re-read). For each yielded response:\
+      \ if requires_response_body \u2192 response.read(). async_auth_flow: await request.aread()\
+      \ / await response.aread(). This is transparent to the auth scheme \u2014 it\
+      \ just sees buffered bodies."
+    input_types:
+    - Request
+    - Response
+    output_types:
+    - Request
+    - Response
+    z_level: 2
+    external: false
+    parent_id: auth_handler.flow_protocol
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _auth.py
+      start_line: 62
+      end_line: 110
+  auth_handler.flow_protocol.generator_driver:
+    component_id: auth_handler.flow_protocol.generator_driver
+    description: "The coroutine pump that drives any Auth.auth_flow() generator. Calls\
+      \ next(flow) to get the first request to send, then drives the send\u2192receive\
+      \ loop: send(response) to inject the server response back into the generator,\
+      \ catching StopIteration as the signal that auth is complete. Ensures flow.close()\
+      \ is called in a finally block to clean up generator resources even on exception."
+    processing: 'flow = auth.auth_flow(request). request = next(flow). while True:
+      response = yield request [to client send loop]. try: request = flow.send(response).
+      except StopIteration: return response. finally: flow.close(). This pattern is
+      mirrored identically in async_auth_flow with async generators.'
+    input_types:
+    - Request
+    output_types:
+    - Request
+    z_level: 2
+    external: false
+    parent_id: auth_handler.flow_protocol
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _auth.py
+      start_line: 62
+      end_line: 86
+    - path: _client.py
+      start_line: 930
+      end_line: 963
+  redirect_handler.request_rewriter.method_coercion:
+    component_id: redirect_handler.request_rewriter.method_coercion
+    description: "Implements RFC 7231 method-change rules for redirects. On 301/302/303:\
+      \ coerce POST \u2192 GET (HEAD and GET are preserved). On 307/308: method is\
+      \ always preserved. This rule prevents form data from being re-submitted on\
+      \ a redirect, which is the safe browser-compatible default."
+    processing: '_redirect_method(request, response): if response.status_code in (301,
+      302, 303) and request.method == ''POST'': return ''GET''. else: return request.method.
+      Used by _build_redirect_request to set the new request''s method before body/header
+      decisions.'
+    input_types:
+    - Request
+    - StatusCode
+    output_types:
+    - str
+    z_level: 2
+    external: false
+    parent_id: redirect_handler.request_rewriter
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 494
+      end_line: 545
+  redirect_handler.request_rewriter.header_scrubber:
+    component_id: redirect_handler.request_rewriter.header_scrubber
+    description: Strips sensitive headers that must not be forwarded across origins
+      or protocol changes on redirect. Always strips Proxy-Authorization. Strips Authorization
+      if the redirect crosses origins (different scheme+host+port). Preserves all
+      other headers. This prevents credential leakage to unrelated servers.
+    processing: '_redirect_headers(request, url): build new_headers = [(k,v) for k,v
+      in request.headers.raw if k.lower() not in sensitive]. sensitive always includes
+      b''proxy-authorization''. Also include b''authorization'' if origin changed:
+      (url.scheme, url.host, url.port) != (request.url.scheme, request.url.host, request.url.port).'
+    input_types:
+    - Headers
+    - URL
+    output_types:
+    - Headers
+    z_level: 2
+    external: false
+    parent_id: redirect_handler.request_rewriter
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _client.py
+      start_line: 546
+      end_line: 582
+  response_model.content_decoder_chain.encoding_selector:
+    component_id: response_model.content_decoder_chain.encoding_selector
+    description: Parses the Content-Encoding header and instantiates the appropriate
+      decoder stack. Handles comma-separated and comma-chained encoding tokens (e.g.
+      "gzip, br"). Maps token strings to decoder classes. Composes multiple decoders
+      into a MultiDecoder chain when more than one encoding is present. Falls back
+      to IdentityDecoder for unknown/missing encodings.
+    processing: "Parse Content-Encoding: split on ',', strip whitespace, lowercase\
+      \ each token. Build decoders list: 'gzip'|'x-gzip' \u2192 GZipDecoder(); 'deflate'\
+      \ \u2192 DeflateDecoder(); 'br' \u2192 BrotliDecoder(); 'zstd' \u2192 ZStandardDecoder();\
+      \ 'identity'|'' \u2192 IdentityDecoder(). len>1 \u2192 MultiDecoder(decoders).\
+      \ Return single decoder or MultiDecoder."
+    input_types:
+    - Headers
+    output_types:
+    - ContentDecoder
+    z_level: 2
+    external: false
+    parent_id: response_model.content_decoder_chain
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _models.py
+      start_line: 850
+      end_line: 920
+  response_model.content_decoder_chain.chunk_pipeline:
+    component_id: response_model.content_decoder_chain.chunk_pipeline
+    description: 'Streams raw bytes from the transport through the ContentDecoder
+      chain, yielding decoded chunks. Implements the decode-then-flush pattern: for
+      each chunk call decoder.decode(chunk); at stream end call decoder.flush() for
+      any remaining buffered bytes. Used by both iter_bytes() (streaming) and read()
+      (full buffering) code paths.'
+    processing: 'for chunk in stream: decoded = decoder.decode(chunk); if decoded:
+      yield decoded. After loop: remaining = decoder.flush(); if remaining: yield
+      remaining. ByteChunker wraps output to enforce a consistent chunk size if chunk_size
+      is specified. DecodingError wraps zlib/brotli/zstd exceptions.'
+    input_types:
+    - SyncByteStream
+    - ContentDecoder
+    output_types:
+    - bytes
+    z_level: 2
+    external: false
+    parent_id: response_model.content_decoder_chain
+    version: 0
+    implemented_version: null
+    locations:
+    - path: _decoders.py
+      start_line: 228
+      end_line: 303
+    - path: _models.py
+      start_line: 700
+      end_line: 790
+edges:
+- edge_type: FLOW
+  from_id: public_api
+  to_id: client
+- edge_type: FLOW
+  from_id: config_subsystem
+  to_id: client
+- edge_type: FLOW
+  from_id: url_subsystem
+  to_id: request_builder
+- edge_type: FLOW
+  from_id: headers_cookies
+  to_id: request_builder
+- edge_type: FLOW
+  from_id: content_encoding
+  to_id: request_builder
+- edge_type: FLOW
+  from_id: client
+  to_id: request_builder
+- edge_type: FLOW
+  from_id: request_builder
+  to_id: auth_handler
+- edge_type: FLOW
+  from_id: auth_handler
+  to_id: redirect_handler
+- edge_type: FLOW
+  from_id: redirect_handler
+  to_id: transport_layer
+- edge_type: FLOW
+  from_id: transport_layer
+  to_id: ext_httpcore
+- edge_type: FLOW
+  from_id: ext_httpcore
+  to_id: ext_network
+- edge_type: FLOW
+  from_id: transport_layer
+  to_id: response_model
+- edge_type: FLOW
+  from_id: content_encoding
+  to_id: response_model
+- edge_type: FLOW
+  from_id: response_model
+  to_id: headers_cookies
+- edge_type: FLOW
+  from_id: response_model
+  to_id: exceptions
+- edge_type: FLOW
+  from_id: transport_layer
+  to_id: exceptions
+- edge_type: FLOW
+  from_id: client.lifecycle
+  to_id: client.send_pipeline
+- edge_type: FLOW
+  from_id: client.transport_selection
+  to_id: client.send_pipeline
+- edge_type: FLOW
+  from_id: client.event_hooks
+  to_id: client.send_pipeline
+- edge_type: FLOW
+  from_id: request_builder.url_merge
+  to_id: request_builder.header_merge
+- edge_type: FLOW
+  from_id: request_builder.body_encoder
+  to_id: request_builder.header_merge
+- edge_type: FLOW
+  from_id: auth_handler.flow_protocol
+  to_id: auth_handler.basic
+- edge_type: FLOW
+  from_id: auth_handler.flow_protocol
+  to_id: auth_handler.digest
+- edge_type: FLOW
+  from_id: redirect_handler.dispatch_loop
+  to_id: redirect_handler.request_rewriter
+- edge_type: FLOW
+  from_id: redirect_handler.request_rewriter
+  to_id: redirect_handler.dispatch_loop
+- edge_type: FLOW
+  from_id: response_model.stream_reader
+  to_id: response_model.content_decoder_chain
+- edge_type: FLOW
+  from_id: response_model.content_decoder_chain
+  to_id: response_model.text_json
+- edge_type: FLOW
+  from_id: url_subsystem.parser
+  to_id: url_subsystem.query_params
+- edge_type: FLOW
+  from_id: headers_cookies.headers
+  to_id: headers_cookies.cookies
+- edge_type: FLOW
+  from_id: config_subsystem.ssl
+  to_id: config_subsystem.timeout
+- edge_type: FLOW
+  from_id: redirect_handler.dispatch_loop.hook_runner
+  to_id: redirect_handler.dispatch_loop.single_request
+- edge_type: FLOW
+  from_id: transport_layer.http_transport.request_translator
+  to_id: transport_layer.http_transport.pool
+- edge_type: FLOW
+  from_id: transport_layer.http_transport.pool
+  to_id: transport_layer.http_transport.response_translator
+- edge_type: FLOW
+  from_id: auth_handler.flow_protocol.body_buffer
+  to_id: auth_handler.flow_protocol.generator_driver
+- edge_type: FLOW
+  from_id: redirect_handler.request_rewriter.method_coercion
+  to_id: redirect_handler.request_rewriter.header_scrubber
+- edge_type: FLOW
+  from_id: response_model.content_decoder_chain.encoding_selector
+  to_id: response_model.content_decoder_chain.chunk_pipeline
+warnings:
+- id: hanging_output__client
+  ignore_reason: "Response is the terminal output delivered to the caller \u2014 no\
+    \ downstream consumer within the graph."
+- id: hanging_output__redirect_handler
+  ignore_reason: "Response returned to auth_handler feedback loop or ultimately to\
+    \ client \u2014 terminal within this z-level view; wired at parent scope."
+- id: hanging_output__response_model
+  ignore_reason: "DecodedResponse is the terminal user-facing artifact \u2014 cookies\
+    \ extracted and response returned to caller."
+- id: hanging_output__url_subsystem
+  ignore_reason: "URL is consumed by request_builder; the FLOW from url_subsystem\
+    \ to request_builder is present \u2014 this is a supporting subsystem feeding\
+    \ the builder."
+- id: hanging_output__headers_cookies
+  ignore_reason: "Headers/Cookies flow into request_builder (upward FLOW) and are\
+    \ also extracted from Response \u2014 bidirectional supporting subsystem, not\
+    \ a single linear sink."
+- id: hanging_output__config_subsystem
+  ignore_reason: "Timeout/Limits/Proxy/SSLContext are value objects injected into\
+    \ Client at construction time \u2014 they feed the client node but the cycle is\
+    \ init-time, not per-request FLOW."
+- id: hanging_output__content_encoding
+  ignore_reason: "Encoded stream feeds request_builder (request side) and decoded\
+    \ bytes feed response_model (response side) \u2014 both are wired; the warning\
+    \ is a z=0 coarseness artifact."
+- id: hanging_output__exceptions
+  ignore_reason: "HTTPError propagates as an exception, not a data flow value \u2014\
+    \ it is a side-exit, not a downstream consumer input."
+- id: hanging_output__public_api
+  ignore_reason: "public_api is the outermost boundary \u2014 Response is returned\
+    \ to the end user / CLI, which is outside the graph."
+- id: hanging_output__client.lifecycle
+  ignore_reason: ClientState is internal state, not propagated as data flow output
+    beyond lifecycle management.
+- id: hanging_output__client.send_pipeline
+  ignore_reason: "Response is the terminal output of the send pipeline \u2014 returned\
+    \ to the caller of client.send()."
+- id: hanging_output__client.transport_selection
+  ignore_reason: "BaseTransport is injected into send_pipeline as a dependency, not\
+    \ a FLOW data value \u2014 it's a resolved capability object."
+- id: hanging_output__client.event_hooks
+  ignore_reason: "Event hooks pass Request/Response through unchanged as a side-effect\
+    \ notification \u2014 the mutated values feed back into the pipeline via the same\
+    \ references."
+- id: hanging_output__request_builder.url_merge
+  ignore_reason: "URL flows into header_merge via Request construction \u2014 the\
+    \ merge ordering at z=1 is sequential build-up into a single Request object."
+- id: hanging_output__request_builder.body_encoder
+  ignore_reason: "SyncByteStream and Headers feed into header_merge as inputs to Request\
+    \ construction \u2014 the FLOW edge is body_encoder\u2192header_merge."
+- id: hanging_output__request_builder.header_merge
+  ignore_reason: "Headers is the final merged output that composes the Request \u2014\
+    \ returned to auth_handler as part of the built Request object."
+- id: hanging_output__auth_handler.basic
+  ignore_reason: "Request is terminal output of auth scheme \u2014 yielded to the\
+    \ auth_handler.flow_protocol driver which dispatches it onward."
+- id: hanging_output__auth_handler.digest
+  ignore_reason: "Request is terminal output of digest challenge-response \u2014 yielded\
+    \ to flow_protocol driver after computing Authorization header."
+- id: hanging_output__transport_layer.http_transport
+  ignore_reason: "Response is the terminal product of the HTTP transport \u2014 returned\
+    \ up to redirect_handler/auth_handler."
+- id: hanging_output__transport_layer.async_transport
+  ignore_reason: "Response is the terminal product of the async transport \u2014 returned\
+    \ up to AsyncClient's redirect/auth loop."
+- id: hanging_output__transport_layer.wsgi_asgi
+  ignore_reason: "Response is the terminal product of the in-process WSGI/ASGI transport\
+    \ \u2014 returned up to the client pipeline for testing."
+- id: hanging_output__response_model.text_json
+  ignore_reason: "str/Any are the final user-accessible decoded values \u2014 terminal\
+    \ outputs delivered to the caller of .text/.json()."
+- id: hanging_output__url_subsystem.parser
+  ignore_reason: "ParseResult feeds into URL constructor which is consumed by query_params\
+    \ and the URL object \u2014 internal sub-step, not a graph-level sink."
+- id: hanging_output__url_subsystem.query_params
+  ignore_reason: "QueryParams is terminal output of URL subsystem \u2014 consumed\
+    \ by request_builder.url_merge when merging client params with per-request params."
+- id: hanging_output__content_encoding.multipart
+  ignore_reason: "MultipartStream is a SyncByteStream subtype \u2014 it IS the body\
+    \ stream returned by body_encoder to request_builder; wired at parent level."
+- id: hanging_output__content_encoding.response_decoders
+  ignore_reason: "Decoded bytes feed into content_decoder_chain which passes them\
+    \ to response_model \u2014 wired at parent level."
+- id: hanging_output__headers_cookies.headers
+  ignore_reason: "Headers flows into Cookies and into request/response objects \u2014\
+    \ consumed at parent level by both request_builder and response_model."
+- id: hanging_output__headers_cookies.cookies
+  ignore_reason: "Cookies jar is stored on the client and injected into requests \u2014\
+    \ a persistent side-effect store, not a linear data flow sink."
+- id: hanging_output__config_subsystem.timeout
+  ignore_reason: "Timeout is a value object stored on the client and written into\
+    \ request.extensions \u2014 init-time injection, not per-request FLOW."
+- id: hanging_output__config_subsystem.ssl
+  ignore_reason: "SSLContext is passed to HTTPTransport at init time \u2014 an injected\
+    \ dependency, not a per-request FLOW output."
+- id: hanging_output__exceptions.network_errors
+  ignore_reason: "TransportError propagates as an exception side-exit \u2014 not a\
+    \ downstream data consumer input."
+- id: hanging_output__exceptions.http_errors
+  ignore_reason: "HTTPStatusError propagates as an exception raised by response.raise_for_status()\
+    \ \u2014 terminal side-exit, not a FLOW sink."
+- id: hanging_output__public_api.functional
+  ignore_reason: "Response is the terminal output returned to the user of the one-shot\
+    \ convenience functions \u2014 outside the graph boundary."
+- id: hanging_output__public_api.cli
+  ignore_reason: "Response is consumed by the CLI printer (pretty-print to stdout)\
+    \ \u2014 a side-effect terminal, not a data flow sink within the graph."
+- id: hanging_output__redirect_handler.dispatch_loop.single_request
+  ignore_reason: "Response returned from single_request feeds back into hook_runner\
+    \ \u2014 the FLOW is hook_runner\u2192single_request, return is implicit via the\
+    \ caller loop."
+- id: hanging_output__redirect_handler.dispatch_loop.hook_runner
+  ignore_reason: "Response is the terminal output of each dispatch hop \u2014 returned\
+    \ up through the redirect loop to auth_handler or the caller."
+- id: hanging_output__transport_layer.http_transport.response_translator
+  ignore_reason: "Response is the terminal product of the transport \u2014 returned\
+    \ up to redirect_handler.dispatch_loop.single_request."
+- id: hanging_output__auth_handler.flow_protocol.body_buffer
+  ignore_reason: "Response is passed into the generator via flow.send(response) after\
+    \ body buffering \u2014 not a downstream graph node, it re-enters the generator\
+    \ coroutine directly."
+- id: hanging_output__auth_handler.flow_protocol.generator_driver
+  ignore_reason: "Request yielded from generator_driver goes to the client's send\
+    \ loop (redirect_handler) \u2014 cross-boundary delivery modeled at the parent\
+    \ z-level."
+- id: hanging_output__redirect_handler.request_rewriter.method_coercion
+  ignore_reason: "Method string feeds into header_scrubber to determine whether to\
+    \ strip body \u2014 the FLOW edge method_coercion\u2192header_scrubber captures\
+    \ this."
+- id: hanging_output__redirect_handler.request_rewriter.header_scrubber
+  ignore_reason: "Scrubbed Headers compose the new redirect Request \u2014 terminal\
+    \ output assembled by _build_redirect_request at the parent level."
+- id: hanging_output__response_model.content_decoder_chain.chunk_pipeline
+  ignore_reason: "Decoded bytes are the terminal output of the decoder pipeline \u2014\
+    \ consumed by response_model.stream_reader._content cache or yielded to the caller\
+    \ of iter_bytes()."
+- id: starved_input__client
+  ignore_reason: "RequestParams enters at the graph boundary from user code \u2014\
+    \ it is the external input to the system."
+- id: starved_input__request_builder
+  ignore_reason: "RequestParams and ClientDefaults enter from user call and Client.__init__\
+    \ respectively \u2014 both are graph-boundary inputs."
+- id: starved_input__auth_handler
+  ignore_reason: "Auth object is injected at client construction or per-request \u2014\
+    \ boundary input."
+- id: starved_input__transport_layer
+  ignore_reason: "Request arrives from redirect_handler which is a sibling FLOW; the\
+    \ starved warning is because redirect_handler outputs Response not Request \u2014\
+    \ the transport input is fed by redirect_handler's internal dispatch, wired at\
+    \ z=1."
+- id: starved_input__headers_cookies
+  ignore_reason: HeaderTypes/CookieTypes enter from user code at graph boundary; headers_cookies
+    is a supporting subsystem called by both request_builder and response_model.
+- id: starved_input__exceptions
+  ignore_reason: "HTTPCoreException enters from ext_httpcore (external boundary) and\
+    \ StatusCode from response \u2014 both are graph-boundary inputs to the exception\
+    \ mapping layer."
+- id: starved_input__client.send_pipeline
+  ignore_reason: "Auth and bool (follow_redirects) are boundary inputs from user call\
+    \ to send() \u2014 per-request overrides entering the graph."
+- id: starved_input__request_builder.header_merge
+  ignore_reason: "HeaderTypes inputs come from client defaults and per-request args\
+    \ \u2014 graph boundary inputs, not produced by sibling nodes at this z-level."
+- id: starved_input__redirect_handler.request_rewriter
+  ignore_reason: "Request rewriter receives original Request from dispatch_loop via\
+    \ the FLOW edge (dispatch_loop\u2192request_rewriter); the starved type 'Request'\
+    \ is already wired by that edge."
+- id: starved_input__response_model.content_decoder_chain
+  ignore_reason: "Headers arrives from the Response object produced by transport \u2014\
+    \ the content-encoding selection reads response headers as a boundary input to\
+    \ this z-level."
+- id: starved_input__response_model.text_json
+  ignore_reason: "Headers needed for charset detection arrive from the Response object\
+    \ \u2014 boundary input to the text/json decoding layer at this z-level."
+- id: starved_input__url_subsystem.query_params
+  ignore_reason: "QueryParamTypes enter from user-supplied params arg \u2014 graph\
+    \ boundary input from user code."
+- id: starved_input__headers_cookies.cookies
+  ignore_reason: "Response arrives from response_model (via Set-Cookie extraction)\
+    \ and CookieTypes from user boundary \u2014 both are intentional inputs from outside\
+    \ this subsystem."
+- id: starved_input__config_subsystem.timeout
+  ignore_reason: "TimeoutTypes enter from user-supplied timeout arg at client construction\
+    \ \u2014 graph boundary input."
+- id: starved_input__redirect_handler.dispatch_loop.single_request
+  ignore_reason: "Request enters from hook_runner (sibling) after hooks fire \u2014\
+    \ the FLOW hook_runner\u2192single_request models this; the starved type is already\
+    \ wired."
+- id: starved_input__redirect_handler.request_rewriter.header_scrubber
+  ignore_reason: "Headers and URL arrive from the original Request being rewritten\
+    \ \u2014 boundary inputs at this z-level, not produced by sibling nodes."
+- id: starved_input__response_model.content_decoder_chain.chunk_pipeline
+  ignore_reason: "SyncByteStream arrives from the transport via response_model.stream_reader\
+    \ \u2014 cross-boundary input fed through the parent Response object."
+- id: coverage_gap__client
+  ignore_reason: "RequestParams is a parent-level aggregate type; children operate\
+    \ on its decomposed parts (URL, Headers, Auth, body) \u2014 coverage at child\
+    \ granularity is correct."
+- id: coverage_gap__request_builder
+  ignore_reason: "Parent uses RequestParams/ClientDefaults/Request aggregate labels;\
+    \ children decompose into URL, Headers, SyncByteStream \u2014 intentional abstraction\
+    \ boundary between levels."
+- id: coverage_gap__auth_handler
+  ignore_reason: "Auth is injected as a dependency at construction/call time, not\
+    \ as a FLOW-entry type into a child node \u2014 intentional design."
+- id: coverage_gap__redirect_handler
+  ignore_reason: "Parent uses Request/Response aggregate labels; children use the\
+    \ same types but the bidirectional loop means no single entry/exit node covers\
+    \ them \u2014 intentional feedback loop design."
+- id: coverage_gap__response_model
+  ignore_reason: "Parent Response/DecodedResponse labels are higher-level abstractions;\
+    \ children operate on SyncByteStream, bytes, Headers \u2014 intentional type refinement\
+    \ across decomposition levels."
+- id: coverage_gap__url_subsystem
+  ignore_reason: "URL is the parent output type; children produce ParseResult and\
+    \ QueryParams which together compose a URL \u2014 intentional decomposition of\
+    \ the URL type."
+- id: coverage_gap__headers_cookies
+  ignore_reason: "Parent uses HeaderTypes/CookieTypes/Headers/Cookies labels; children\
+    \ specialize further \u2014 the type vocabulary mismatch is an intentional level-of-abstraction\
+    \ gap."
+- id: coverage_gap__config_subsystem
+  ignore_reason: "Parent outputs Timeout/Limits/Proxy/SSLContext; children cover Timeout\
+    \ and SSLContext \u2014 Limits and Proxy are simple data containers without further\
+    \ decomposition, intentionally omitted as leaf behavior."
+- id: coverage_gap__content_encoding
+  ignore_reason: "Parent uses RequestContent/SyncByteStream aggregate labels; children\
+    \ specialize into multipart and concrete decoder implementations \u2014 intentional\
+    \ type refinement across levels."
+- id: coverage_gap__exceptions
+  ignore_reason: "Parent HTTPError label is the union type; children produce TransportError\
+    \ and HTTPStatusError which are the two main subhierarchies \u2014 intentional\
+    \ type refinement at child level."
+- id: coverage_gap__redirect_handler.request_rewriter
+  ignore_reason: "Parent uses Request/Response/Request labels; children operate on\
+    \ method string and Headers which are components of a Request \u2014 intentional\
+    \ decomposition of the Request type across child nodes."
+- id: coverage_gap__response_model.content_decoder_chain
+  ignore_reason: "Parent input 'bytes' reflects the raw byte input; children refine\
+    \ this into Headers (for selection) and SyncByteStream+ContentDecoder (for pipeline)\
+    \ \u2014 intentional type decomposition."
+- id: flow_cycle
+  ignore_reason: "The client\u2192request_builder cycle is intentional: client invokes\
+    \ build_request() which uses client defaults, and auth drives re-requests in a\
+    \ challenge-response loop \u2014 both are by design."
