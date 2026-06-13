@@ -243,6 +243,7 @@ def _comp_dict(c: Component) -> dict:
         "version": c.version,
         "status": _status(c),
         "locations": [_loc_dict(loc) for loc in c.locations],
+        **({"feature": c.feature} if c.feature else {}),
     }
 
 
@@ -404,22 +405,29 @@ def get_graph_stats() -> dict:
     component/edge counts, max z-level reached, and active (non-ignored) warning
     count. Call this when unsure what is open or how far authoring has progressed.
 
-    Returns {"error": ...} with the list of available graphs if none is open."""
+    Counts describe the AS-BUILT base; planned-feature nodes are summarized
+    separately under `features`. Returns {"error": ...} if none is open."""
     if GRAPH is None:
         return _no_active()
     _recompute_warnings()
-    max_z = max((c.z_level for c in GRAPH.components.values()), default=0)
+    base = [c for c in GRAPH.components.values() if c.feature is None]
+    max_z = max((c.z_level for c in base), default=0)
     by_status = {"planned": 0, "implemented": 0, "stale": 0, "drifted": 0}
-    for c in GRAPH.components.values():
+    for c in base:
         by_status[_status(c)] += 1
+    features: dict[str, int] = {}
+    for c in GRAPH.components.values():
+        if c.feature is not None:
+            features[c.feature] = features.get(c.feature, 0) + 1
     return {
         "name": ACTIVE,
         "graph_path": _active_path(),
         "project_root": _project_root(),
-        "components": len(GRAPH.components),
+        "components": len(base),
         "edges": len(GRAPH.edges),
         "max_z_level": max_z,
         "by_status": by_status,
+        "features": features,
         "last_synced_sha": GRAPH.last_synced_sha,
         "active_warnings": len(_active_warnings(GRAPH.warnings)),
     }
@@ -582,10 +590,15 @@ def get_active_warnings() -> dict:
 
 
 @mcp.tool()
-def get_orient() -> dict:
+def get_orient(feature: Optional[str] = None) -> dict:
     """Compact whole-graph orientation map: one cheap call that returns the entire
     SCOPE tree as a terse indented list so an operator grasps the whole layout
     without crawling get_subgraph node by node.
+
+    By default this shows the AS-BUILT base only — planned-feature nodes are
+    hidden so the map reflects the running system. Pass feature=NAME to overlay
+    that feature's planned nodes on top of the base (each marked with its
+    feature). Use list_features() to see what features exist.
 
     Each line in the map contains: z-level indent, id, one-line description,
     input_types → output_types, status.  Returns {"map": [terse-component, ...]}
@@ -593,18 +606,22 @@ def get_orient() -> dict:
     if GRAPH is None:
         return _no_active()
 
-    # Find roots: components with no parent_id
-    roots = [c for c in GRAPH.components.values() if c.parent_id is None]
+    def in_view(c: Component) -> bool:
+        return c.feature is None or c.feature == feature
+
+    roots = [c for c in GRAPH.components.values() if c.parent_id is None and in_view(c)]
     roots.sort(key=lambda c: c.component_id)
 
     result = []
 
     def walk(cid: str, depth: int):
         c = GRAPH.components.get(cid)
-        if c is None:
+        if c is None or not in_view(c):
             return
         node = _terse(c)
         node["indent"] = depth
+        if c.feature:
+            node["feature"] = c.feature
         result.append(node)
         for child_id in sorted(c.children):
             walk(child_id, depth + 1)
@@ -612,7 +629,7 @@ def get_orient() -> dict:
     for root in roots:
         walk(root.component_id, 0)
 
-    return {"map": result, "count": len(result)}
+    return {"map": result, "count": len(result), "feature": feature}
 
 
 @mcp.tool()
@@ -784,12 +801,15 @@ def get_work_context(
 
 
 @mcp.tool()
-def get_pending_implementation() -> dict:
+def get_pending_implementation(feature: Optional[str] = None) -> dict:
     """Components whose code does not match the graph: 'planned' (never built),
     'stale' (spec edited since the code was last written), or 'drifted' (code
     changed in git since it was last verified). This is the work queue for
     IMPLEMENTATION MODE. External (atomic boundary) nodes are excluded -- they
     are not ours to implement.
+
+    By default this is the AS-BUILT queue (base nodes only). Pass feature=NAME to
+    get the build queue for a planned feature instead (its own nodes).
 
     Sorted drifted/stale-first, then leaves-first, then shallowest. Returns
     {"pending": [{component_id, status, z_level, is_leaf, locations}], "count"}."""
@@ -797,6 +817,8 @@ def get_pending_implementation() -> dict:
         return _no_active()
     pending = []
     for c in GRAPH.components.values():
+        if c.feature != feature:
+            continue
         st = _status(c)
         if st in ("planned", "stale", "drifted") and not c.external:
             pending.append(
@@ -810,6 +832,28 @@ def get_pending_implementation() -> dict:
             )
     pending.sort(key=lambda p: (p["status"] not in ("stale", "drifted"), not p["is_leaf"], p["z_level"]))
     return {"pending": pending, "count": len(pending)}
+
+
+@mcp.tool()
+def list_features() -> dict:
+    """List the PLANNED features layered beside the as-built base — proposals that
+    do not yet exist in code and are excluded from base views. Each feature is a
+    named set of components you author with propose_component(..., feature=NAME)
+    and build later; get_orient(feature=NAME) overlays one on the base, and
+    get_pending_implementation(feature=NAME) is its build queue.
+
+    Returns {"features": [{name, components, z0_roots}], "count"}."""
+    if GRAPH is None:
+        return _no_active()
+    feats: dict[str, dict] = {}
+    for c in GRAPH.components.values():
+        if c.feature is None:
+            continue
+        f = feats.setdefault(c.feature, {"name": c.feature, "components": 0, "z0_roots": []})
+        f["components"] += 1
+        if c.parent_id is None:
+            f["z0_roots"].append(c.component_id)
+    return {"features": sorted(feats.values(), key=lambda f: f["name"]), "count": len(feats)}
 
 
 # ===========================================================================
@@ -826,6 +870,7 @@ def propose_component(
     external: bool = False,
     parent_id: Optional[str] = None,
     locations: Optional[list[dict]] = None,
+    feature: Optional[str] = None,
 ) -> dict:
     """Add a new component to the graph. Propose ONE at a time, then VERIFY.
 
@@ -839,6 +884,10 @@ def propose_component(
       warning will note it) and refine as you decompose.
     - locations is an optional list of {"path", "start_line"?, "end_line"?} mapping
       the component to source. Optional for high-level nodes; expected for leaves.
+    - feature: name a PLANNED feature this node belongs to. Feature nodes are a
+      proposal layered beside the as-built base; base views (warnings, orient,
+      stats, the impl queue) exclude them, so planning never pollutes the live
+      graph. Omit it for as-built work. A node joins the base when its code lands.
 
     Structural problems (duplicate id, missing/ invalid parent, wrong z_level)
     block the write and come back as {"ok": False, "errors": [...]}. On success
@@ -864,6 +913,7 @@ def propose_component(
         external=external,
         parent_id=parent_id,
         locations=locs,
+        feature=feature,
     )
     errors = _propose_component(GRAPH, component)
     if errors:

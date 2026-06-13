@@ -16,6 +16,7 @@ EDITABLE_FIELDS = {
     "external",
     "locations",
     "z_level",
+    "feature",
 }
 
 

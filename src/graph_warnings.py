@@ -7,7 +7,7 @@ from validator import detect_cycles, validate_input_coverage, validate_output_co
 def check_hanging_outputs(graph: Graph) -> list[Warning]:
     result = []
     for component in graph.components.values():
-        if component.external:
+        if component.external or component.feature is not None:
             continue
         consumed = set()
         for edge_id in component.edges_out:
@@ -41,7 +41,7 @@ def check_hanging_outputs(graph: Graph) -> list[Warning]:
 def check_starved_inputs(graph: Graph) -> list[Warning]:
     result = []
     for component in graph.components.values():
-        if component.external:
+        if component.external or component.feature is not None:
             continue
         # Only meaningful once a component is wired into sibling flow. A pure
         # entry node with no incoming FLOW is a graph boundary, not a bug.
@@ -74,6 +74,8 @@ def check_starved_inputs(graph: Graph) -> list[Warning]:
 def check_coverage(graph: Graph) -> list[Warning]:
     result = []
     for component in graph.components.values():
+        if component.feature is not None:
+            continue
         gaps = (
             validate_input_coverage(graph, component)
             + validate_output_coverage(graph, component)
@@ -96,6 +98,10 @@ def check_flow_cycles(graph: Graph) -> list[Warning]:
     cycle = detect_cycles(graph, EdgeType.FLOW)
     if not cycle:
         return []
+    # A cycle living entirely inside a planned feature is not a base-graph
+    # concern; surface it only when the feature is being worked, not here.
+    if any(graph.components[c].feature is not None for c in cycle):
+        return []
     # Identify the warning by the cycle's members (order-independent) so ignoring
     # one intentional feedback loop does not also silence a different, accidental
     # cycle elsewhere in the graph.
@@ -114,7 +120,7 @@ def check_flow_cycles(graph: Graph) -> list[Warning]:
 def check_undefined_types(graph: Graph) -> list[Warning]:
     result = []
     for component in graph.components.values():
-        if component.external:
+        if component.external or component.feature is not None:
             continue
         undefined = []
         if not component.input_types:
@@ -140,6 +146,8 @@ def check_orphaned_components(graph: Graph) -> list[Warning]:
         return []
     result = []
     for component in graph.components.values():
+        if component.feature is not None:
+            continue
         if not component.edges_in and not component.edges_out:
             result.append(Warning(
                 id=f"orphaned_component__{component.component_id}",

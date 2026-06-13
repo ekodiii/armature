@@ -22,8 +22,9 @@ def save_graph(graph: Graph, path: str):
                 "version": c.version,
                 "implemented_version": c.implemented_version,
                 "implemented_sha": c.implemented_sha,
-                # only persist drift when set — keeps the common case clean
+                # only persist drift / feature when set — keeps base nodes clean
                 **({"code_drifted": True} if c.code_drifted else {}),
+                **({"feature": c.feature} if c.feature else {}),
                 "locations": [
                     {
                         "path": loc.path,
@@ -77,6 +78,7 @@ def load_graph(path: str) -> Graph:
             implemented_version=c_data.get("implemented_version"),
             implemented_sha=c_data.get("implemented_sha"),
             code_drifted=c_data.get("code_drifted", False),
+            feature=c_data.get("feature"),
             locations=[
                 FileLocation(
                     path=loc["path"],

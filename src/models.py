@@ -55,6 +55,12 @@ class Component:
     # cannot be derived from in-graph state alone — git is the external oracle, so
     # reconcile materializes it. Drives the 'drifted' status.
     code_drifted: bool = False
+    # None = part of the as-built base (the running system). A non-None value names
+    # the planned FEATURE this node belongs to: a proposal layered beside the base
+    # that does not yet exist in code. Base views (warnings, orient, stats, the
+    # impl queue) exclude feature nodes, so planned work never pollutes the live
+    # graph. A node sheds its feature tag — joining the base — when its code lands.
+    feature: Optional[str] = None
 
 
 # Warnings

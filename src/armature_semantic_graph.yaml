@@ -1543,9 +1543,10 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 0
+    version: 1
     implemented_version: null
     implemented_sha: null
+    feature: verification-router
     locations: []
   vr-obligation-extractor:
     component_id: vr-obligation-extractor
@@ -1560,9 +1561,10 @@ components:
     z_level: 1
     external: false
     parent_id: verification-router
-    version: 0
+    version: 1
     implemented_version: null
     implemented_sha: null
+    feature: verification-router
     locations: []
   vr-checker-router:
     component_id: vr-checker-router
@@ -1577,9 +1579,10 @@ components:
     z_level: 1
     external: false
     parent_id: verification-router
-    version: 0
+    version: 1
     implemented_version: null
     implemented_sha: null
+    feature: verification-router
     locations: []
   vr-pbt-generator:
     component_id: vr-pbt-generator
@@ -1594,9 +1597,10 @@ components:
     z_level: 1
     external: false
     parent_id: verification-router
-    version: 0
+    version: 1
     implemented_version: null
     implemented_sha: null
+    feature: verification-router
     locations: []
   vr-formal-checker:
     component_id: vr-formal-checker
@@ -1612,9 +1616,10 @@ components:
     z_level: 1
     external: false
     parent_id: verification-router
-    version: 0
+    version: 1
     implemented_version: null
     implemented_sha: null
+    feature: verification-router
     locations: []
 edges:
 - edge_type: FLOW
@@ -1961,9 +1966,6 @@ warnings:
 - id: hanging_output__git-sync
   ignore_reason: Planned subsystem; ReconcileReport/DriftMark consumed by the operator
     + graph-core (REFERENCE), wired at implementation.
-- id: hanging_output__verification-router
-  ignore_reason: Planned subsystem; ObligationResult feeds the fidelity report at
-    implementation.
 - id: starved_input__graph-core
   ignore_reason: "MutationRequest/QueryRequest enter graph-core from mcp-dispatch\
     \ at the z=0 FLOW boundary \u2014 justified entry inputs from an external caller."
