@@ -33,7 +33,7 @@ components:
     parent_id: null
     version: 3
     implemented_version: 3
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 1
@@ -57,7 +57,7 @@ components:
     parent_id: null
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: models.py
       start_line: 1
@@ -95,7 +95,7 @@ components:
     parent_id: null
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/__init__.py
       start_line: 1
@@ -137,7 +137,7 @@ components:
     parent_id: mcp-dispatch
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 304
@@ -164,7 +164,7 @@ components:
     parent_id: mcp-dispatch
     version: 3
     implemented_version: 3
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 402
@@ -186,7 +186,7 @@ components:
     parent_id: mcp-dispatch
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 809
@@ -207,7 +207,7 @@ components:
     parent_id: mcp-dispatch
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 1118
@@ -233,7 +233,7 @@ components:
     parent_id: mcp-dispatch
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 107
@@ -257,7 +257,7 @@ components:
     parent_id: graph-core
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: models.py
       start_line: 1
@@ -280,7 +280,7 @@ components:
     parent_id: graph-core
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: store.py
       start_line: 1
@@ -302,7 +302,7 @@ components:
     parent_id: graph-core
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: writer.py
       start_line: 1
@@ -327,7 +327,7 @@ components:
     parent_id: graph-core
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: validator.py
       start_line: 1
@@ -350,7 +350,7 @@ components:
     parent_id: graph-core
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: graph_warnings.py
       start_line: 1
@@ -373,7 +373,7 @@ components:
     parent_id: graph-core
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: operations.py
       start_line: 1
@@ -396,7 +396,7 @@ components:
     parent_id: graph-core
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: serializer.py
       start_line: 1
@@ -419,7 +419,7 @@ components:
     parent_id: core-operations
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: operations.py
       start_line: 8
@@ -441,7 +441,7 @@ components:
     parent_id: core-operations
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: operations.py
       start_line: 20
@@ -464,7 +464,7 @@ components:
     parent_id: core-operations
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: operations.py
       start_line: 35
@@ -486,7 +486,7 @@ components:
     parent_id: core-operations
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: operations.py
       start_line: 56
@@ -507,7 +507,7 @@ components:
     parent_id: core-operations
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: operations.py
       start_line: 80
@@ -530,7 +530,7 @@ components:
     parent_id: core-operations
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: operations.py
       start_line: 87
@@ -553,7 +553,7 @@ components:
     parent_id: core-store
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: store.py
       start_line: 5
@@ -575,7 +575,7 @@ components:
     parent_id: core-store
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: store.py
       start_line: 21
@@ -598,7 +598,7 @@ components:
     parent_id: core-store
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: store.py
       start_line: 51
@@ -619,7 +619,7 @@ components:
     parent_id: dispatch-query
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 423
@@ -641,7 +641,7 @@ components:
     parent_id: dispatch-query
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 439
@@ -665,7 +665,7 @@ components:
     parent_id: dispatch-query
     version: 3
     implemented_version: 3
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 682
@@ -688,7 +688,7 @@ components:
     parent_id: dispatch-query
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 548
@@ -710,7 +710,7 @@ components:
     parent_id: translator-pipeline
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/source_ingestion.py
       start_line: 1
@@ -732,7 +732,7 @@ components:
     parent_id: translator-pipeline
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/skeleton.py
       start_line: 1
@@ -755,7 +755,7 @@ components:
     parent_id: translator-pipeline
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/models.py
       start_line: 1
@@ -779,7 +779,7 @@ components:
     parent_id: trans-skeleton
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/skeleton.py
       start_line: 162
@@ -802,7 +802,7 @@ components:
     parent_id: trans-skeleton
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/skeleton.py
       start_line: 250
@@ -825,7 +825,7 @@ components:
     parent_id: trans-skeleton
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/skeleton.py
       start_line: 493
@@ -850,7 +850,7 @@ components:
     parent_id: trans-skeleton
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/skeleton.py
       start_line: 545
@@ -873,7 +873,7 @@ components:
     parent_id: trans-skeleton
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/skeleton.py
       start_line: 637
@@ -899,7 +899,7 @@ components:
     parent_id: trans-skeleton
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/skeleton.py
       start_line: 682
@@ -923,7 +923,7 @@ components:
     parent_id: dispatch-query
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 222
@@ -945,7 +945,7 @@ components:
     parent_id: dispatch-query
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 576
@@ -967,7 +967,7 @@ components:
     parent_id: dispatch-query
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 610
@@ -989,7 +989,7 @@ components:
     parent_id: core-operations
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: operations.py
       start_line: 8
@@ -1015,7 +1015,7 @@ components:
     parent_id: translator-pipeline
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/verify.py
       start_line: 1
@@ -1036,7 +1036,7 @@ components:
     parent_id: trans-verify
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/verify.py
       start_line: 132
@@ -1056,7 +1056,7 @@ components:
     parent_id: trans-verify
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/verify.py
       start_line: 206
@@ -1077,7 +1077,7 @@ components:
     parent_id: trans-verify
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/verify.py
       start_line: 308
@@ -1100,7 +1100,7 @@ components:
     parent_id: trans-verify
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/verify.py
       start_line: 368
@@ -1124,7 +1124,7 @@ components:
     parent_id: trans-verify
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/verify.py
       start_line: 499
@@ -1147,7 +1147,7 @@ components:
     parent_id: translator-pipeline
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/lift.py
       start_line: 1
@@ -1173,7 +1173,7 @@ components:
     parent_id: trans-lifter
     version: 3
     implemented_version: 3
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/lift.py
       start_line: 185
@@ -1194,7 +1194,7 @@ components:
     parent_id: trans-lifter
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/lift.py
       start_line: 264
@@ -1223,7 +1223,7 @@ components:
     parent_id: trans-lifter
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/lift.py
       start_line: 338
@@ -1250,7 +1250,7 @@ components:
     parent_id: trans-lifter
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/lift.py
       start_line: 436
@@ -1273,7 +1273,7 @@ components:
     parent_id: trans-lifter
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/lift.py
       start_line: 539
@@ -1302,7 +1302,7 @@ components:
     parent_id: trans-lifter
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/lift.py
       start_line: 79
@@ -1326,7 +1326,7 @@ components:
     parent_id: trans-lifter
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/lift.py
       start_line: 570
@@ -1351,7 +1351,7 @@ components:
     parent_id: trans-lifter
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: translator/lift.py
       start_line: 649
@@ -1378,7 +1378,7 @@ components:
     parent_id: mcp-dispatch
     version: 2
     implemented_version: 2
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: server.py
       start_line: 996
@@ -1403,7 +1403,7 @@ components:
     parent_id: null
     version: 0
     implemented_version: 0
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: tests/test_graph_core.py
       start_line: null
@@ -1454,7 +1454,7 @@ components:
     parent_id: null
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: gitsync.py
       start_line: 1
@@ -1478,7 +1478,7 @@ components:
     parent_id: git-sync
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: gitsync.py
       start_line: 64
@@ -1499,7 +1499,7 @@ components:
     parent_id: git-sync
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: gitsync.py
       start_line: 167
@@ -1519,7 +1519,7 @@ components:
     parent_id: git-sync
     version: 1
     implemented_version: 1
-    implemented_sha: null
+    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
     locations:
     - path: gitsync.py
       start_line: 154
@@ -2079,4 +2079,4 @@ warnings:
     \ by any single entry/exit child node. Justified gap."
 - id: flow_cycle__filesystem_graph-core_translator-pipeline
   ignore_reason: Pre-existing intentional job-queue/architecture loop.
-last_synced_sha: null
+last_synced_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
