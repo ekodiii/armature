@@ -31,13 +31,13 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 3
-    implemented_version: 3
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 4
+    implemented_version: 4
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 1
-      end_line: 1269
+      end_line: 1319
   graph-core:
     component_id: graph-core
     description: "In-memory graph substrate \u2014 models, store, writer, validator,\
@@ -55,28 +55,28 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 1
-    implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 2
+    implemented_version: 2
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: models.py
       start_line: 1
-      end_line: 80
+      end_line: 97
     - path: writer.py
       start_line: 1
-      end_line: 104
+      end_line: 113
     - path: validator.py
       start_line: 1
       end_line: 218
     - path: graph_warnings.py
       start_line: 1
-      end_line: 189
+      end_line: 204
     - path: operations.py
       start_line: 1
-      end_line: 104
+      end_line: 148
     - path: serializer.py
       start_line: 1
-      end_line: 135
+      end_line: 144
   translator-pipeline:
     component_id: translator-pipeline
     description: "Codebase-to-graph translation pipeline \u2014 source ingestion and\
@@ -137,7 +137,7 @@ components:
     parent_id: mcp-dispatch
     version: 1
     implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 304
@@ -164,7 +164,7 @@ components:
     parent_id: mcp-dispatch
     version: 3
     implemented_version: 3
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 402
@@ -186,7 +186,7 @@ components:
     parent_id: mcp-dispatch
     version: 2
     implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 809
@@ -233,7 +233,7 @@ components:
     parent_id: mcp-dispatch
     version: 1
     implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 107
@@ -255,13 +255,13 @@ components:
     z_level: 1
     external: false
     parent_id: graph-core
-    version: 1
-    implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 2
+    implemented_version: 2
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: models.py
       start_line: 1
-      end_line: 91
+      end_line: 97
   core-store:
     component_id: core-store
     description: "In-memory CRUD store \u2014 add/remove/get for components and edges,\
@@ -300,13 +300,13 @@ components:
     z_level: 1
     external: false
     parent_id: graph-core
-    version: 2
-    implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 3
+    implemented_version: 3
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: writer.py
       start_line: 1
-      end_line: 112
+      end_line: 113
   core-validator:
     component_id: core-validator
     description: "Structural integrity checker \u2014 validate_edge, validate_component,\
@@ -348,13 +348,13 @@ components:
     z_level: 1
     external: false
     parent_id: graph-core
-    version: 2
-    implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 3
+    implemented_version: 3
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: graph_warnings.py
       start_line: 1
-      end_line: 196
+      end_line: 204
   core-operations:
     component_id: core-operations
     description: "Graph traversal and query engine \u2014 get_neighbors, get_references,\
@@ -394,13 +394,13 @@ components:
     z_level: 1
     external: false
     parent_id: graph-core
-    version: 2
-    implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 3
+    implemented_version: 3
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: serializer.py
       start_line: 1
-      end_line: 142
+      end_line: 144
   ops-neighbors:
     component_id: ops-neighbors
     description: "get_neighbors \u2014 returns direct FLOW or SCOPE sibling neighbors\
@@ -619,7 +619,7 @@ components:
     parent_id: dispatch-query
     version: 1
     implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 423
@@ -688,7 +688,7 @@ components:
     parent_id: dispatch-query
     version: 1
     implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 548
@@ -923,7 +923,7 @@ components:
     parent_id: dispatch-query
     version: 2
     implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 222
@@ -945,7 +945,7 @@ components:
     parent_id: dispatch-query
     version: 2
     implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 576
@@ -967,7 +967,7 @@ components:
     parent_id: dispatch-query
     version: 2
     implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: server.py
       start_line: 610
@@ -1401,9 +1401,9 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 0
-    implemented_version: 0
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 1
+    implemented_version: 1
+    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
     locations:
     - path: tests/test_graph_core.py
       start_line: null
@@ -1418,6 +1418,12 @@ components:
       start_line: null
       end_line: null
     - path: tests/test_translator_verify.py
+      start_line: null
+      end_line: null
+    - path: tests/test_gitsync.py
+      start_line: null
+      end_line: null
+    - path: tests/test_features.py
       start_line: null
       end_line: null
   git:
@@ -2081,4 +2087,4 @@ warnings:
     \ by any single entry/exit child node. Justified gap."
 - id: flow_cycle__filesystem_graph-core_translator-pipeline
   ignore_reason: Pre-existing intentional job-queue/architecture loop.
-last_synced_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+last_synced_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
