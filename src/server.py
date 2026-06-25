@@ -1192,8 +1192,9 @@ def translate_verify() -> dict:
     Requires a cached skeleton (translate_prepare).
 
     Returns {trust_score, trust_breakdown, anchor_findings, coverage_findings,
-    contract_findings, grounding_findings}. The graph and skeleton themselves are
-    omitted from the response (the operator already holds the graph)."""
+    contract_findings, grounding_findings, precision_findings, external_findings}.
+    The graph and skeleton themselves are omitted from the response (the operator
+    already holds the graph)."""
     if GRAPH is None:
         return _no_active()
     if _TRANSLATE_SKELETON is None:
@@ -1206,6 +1207,8 @@ def translate_verify() -> dict:
         "coverage_findings": [dataclasses.asdict(f) for f in vm.coverage_findings],
         "contract_findings": [dataclasses.asdict(f) for f in vm.contract_findings],
         "grounding_findings": [dataclasses.asdict(f) for f in vm.grounding_findings],
+        "precision_findings": [dataclasses.asdict(f) for f in vm.precision_findings],
+        "external_findings": [dataclasses.asdict(f) for f in vm.external_findings],
     }
 
 

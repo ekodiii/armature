@@ -75,14 +75,43 @@ class GroundingFinding:
 
 
 @dataclass
+class PrecisionFinding:
+    """A leaf node that 'covers' many files/symbols with no decomposition.
+
+    This is the inclusion-only blob pattern: anchoring one node to whole files
+    makes every symbol inside count as 'covered' without being modeled, which
+    both fakes coverage and defeats edge grounding (any-symbol-to-any-symbol
+    matching over a huge set almost always finds an incidental link).
+    """
+    component_id: str
+    files: int
+    covered_symbols: int
+    detail: str
+
+
+@dataclass
+class ExternalFinding:
+    """A real external boundary (third-party dependency) with no external node.
+
+    A non-trivial codebase that imports third-party modules but models ZERO
+    external boundaries has mislabeled every I/O edge as internal.
+    """
+    module: str
+    importer_components: list[str]
+    detail: str
+
+
+@dataclass
 class VerificationState:
-    """Accumulated verification results threaded through all five stages."""
+    """Accumulated verification results threaded through all stages."""
     graph: Graph
     skeleton: CodeSkeleton
     anchor_findings: list[AnchorFinding] = field(default_factory=list)
     coverage_findings: list[CoverageFinding] = field(default_factory=list)
     contract_findings: list[ContractFinding] = field(default_factory=list)
     grounding_findings: list[GroundingFinding] = field(default_factory=list)
+    precision_findings: list[PrecisionFinding] = field(default_factory=list)
+    external_findings: list[ExternalFinding] = field(default_factory=list)
 
 
 @dataclass
@@ -94,6 +123,8 @@ class VerifiedModel:
     coverage_findings: list[CoverageFinding]
     contract_findings: list[ContractFinding]
     grounding_findings: list[GroundingFinding]
+    precision_findings: list[PrecisionFinding]
+    external_findings: list[ExternalFinding]
     trust_score: float           # 0.0–1.0
     trust_breakdown: dict        # sub-scores for each dimension
 
@@ -104,6 +135,8 @@ class VerifiedModel:
             f"  coverage_findings   : {len(self.coverage_findings)}",
             f"  contract_findings   : {len(self.contract_findings)}",
             f"  grounding_findings  : {len(self.grounding_findings)}",
+            f"  precision_findings  : {len(self.precision_findings)}",
+            f"  external_findings   : {len(self.external_findings)}",
             f"  trust_breakdown     : {self.trust_breakdown}",
         ]
         if self.anchor_findings:
@@ -122,6 +155,14 @@ class VerifiedModel:
             lines.append("  -- sample grounding findings --")
             for f_ in self.grounding_findings[:5]:
                 lines.append(f"    [{f_.edge_type}] {f_.from_id}→{f_.to_id}: {f_.detail}")
+        if self.precision_findings:
+            lines.append("  -- sample precision findings (coarse blobs) --")
+            for f_ in self.precision_findings[:5]:
+                lines.append(f"    [{f_.component_id}] {f_.files} files / {f_.covered_symbols} symbols")
+        if self.external_findings:
+            lines.append("  -- sample external findings (unmodeled boundaries) --")
+            for f_ in self.external_findings[:5]:
+                lines.append(f"    [{f_.module}] importers={f_.importer_components}")
         return "\n".join(lines)
 
 
@@ -493,7 +534,110 @@ def flow_grounding_checker(state: VerificationState) -> VerificationState:
 
 
 # ---------------------------------------------------------------------------
-# Stage 5 — discrepancy_reconciler
+# Stage — precision_checker  (coarse inclusion-only leaf nodes)
+# ---------------------------------------------------------------------------
+
+# A leaf node anchored to more than this many files, or covering more than this
+# many leaf symbols, is an under-decomposed blob: it fakes coverage (every
+# symbol in the whole file counts as 'covered') and makes edge grounding
+# meaningless. Calibrated so hand-authored graphs with focused leaves pass while
+# whole-subpackage blobs (e.g. one node over 20-30 files) are flagged.
+COARSE_FILE_THRESHOLD = 4
+COARSE_SYMBOL_THRESHOLD = 40
+
+
+def precision_checker(state: VerificationState) -> VerificationState:
+    """Flag leaf components that 'cover' many files/symbols with no decomposition.
+
+    Only LEAF nodes (no children) are judged: a parent is expected to span its
+    whole subtree, but a leaf with no children that still rakes in dozens of
+    files is modeling by inclusion, not by responsibility.
+    """
+    graph = state.graph
+    skeleton = state.skeleton
+    leaf_kinds = {"function", "method", "class"}
+
+    file_to_symbols: dict[str, list[SymbolRecord]] = {}
+    for sym in skeleton.symbols:
+        file_to_symbols.setdefault(sym.path, []).append(sym)
+
+    for cid, comp in graph.components.items():
+        if comp.external or comp.children or not comp.locations:
+            continue
+        files = {loc.path for loc in comp.locations}
+        covered: set[str] = set()
+        for loc in comp.locations:
+            start = loc.start_line or 1
+            end = loc.end_line or 999999
+            for s in file_to_symbols.get(loc.path, []):
+                if s.kind in leaf_kinds and s.start_line <= end and s.end_line >= start:
+                    covered.add(s.id)
+        if len(files) > COARSE_FILE_THRESHOLD or len(covered) > COARSE_SYMBOL_THRESHOLD:
+            state.precision_findings.append(PrecisionFinding(
+                component_id=cid,
+                files=len(files),
+                covered_symbols=len(covered),
+                detail=(
+                    f"leaf component '{cid}' anchors {len(files)} files / "
+                    f"{len(covered)} symbols with no decomposition — inclusion-only "
+                    f"blob, not a modeled responsibility (coverage and grounding "
+                    f"over this node are not trustworthy)"
+                ),
+            ))
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Stage — externals_checker  (unmodeled external boundaries)
+# ---------------------------------------------------------------------------
+
+def externals_checker(state: VerificationState) -> VerificationState:
+    """Flag real external boundaries that are not modeled as external nodes.
+
+    Conservative by design: it fires only when the codebase imports third-party
+    modules (genuine external dependencies, not stdlib) yet the graph contains
+    ZERO external components — the gross failure mode. Per-boundary coverage
+    (matching each third-party module to a specific external node) is left to a
+    future refinement; module names rarely match node ids reliably.
+    """
+    graph = state.graph
+    skeleton = state.skeleton
+
+    thirdparty: dict[str, set[str]] = {}
+    for sc in skeleton.scope_classes:
+        if sc.scope == "third-party" and sc.external_module:
+            thirdparty.setdefault(sc.external_module, set()).add(sc.importer_file)
+
+    if not thirdparty:
+        return state
+    if any(c.external for c in graph.components.values()):
+        return state  # graph models boundaries; can't assess partial coverage by name
+
+    file_to_comps: dict[str, list[str]] = {}
+    for cid, comp in graph.components.items():
+        if comp.external:
+            continue
+        for loc in (comp.locations or []):
+            file_to_comps.setdefault(loc.path, []).append(cid)
+
+    for mod, importers in sorted(thirdparty.items(), key=lambda kv: -len(kv[1]))[:15]:
+        comps = sorted({cid for f in importers for cid in file_to_comps.get(f, [])})
+        state.external_findings.append(ExternalFinding(
+            module=mod,
+            importer_components=comps[:5],
+            detail=(
+                f"third-party dependency '{mod}' is a real external boundary "
+                f"(imported by {len(importers)} file(s)) but the graph models NO "
+                f"external node for it"
+            ),
+        ))
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Stage — discrepancy_reconciler
 # ---------------------------------------------------------------------------
 
 def discrepancy_reconciler(state: VerificationState) -> VerifiedModel:
@@ -552,21 +696,42 @@ def discrepancy_reconciler(state: VerificationState) -> VerifiedModel:
     else:
         grounding_score = 1.0
 
-    # Weighted composite (anchor and coverage slightly more important)
+    # --- Precision score (1 - prevalence of coarse inclusion-only leaves) ---
+    non_ext_leaves = [
+        c for c in graph.components.values()
+        if not c.external and not c.children and c.locations
+    ]
+    if non_ext_leaves:
+        precision_score = 1.0 - len(state.precision_findings) / len(non_ext_leaves)
+    else:
+        precision_score = 1.0
+    precision_score = max(0.0, min(1.0, precision_score))
+
+    # --- Externals score (are real boundaries represented at all?) ---
+    externals_score = 0.0 if state.external_findings else 1.0
+
+    # Weighted composite. precision + externals are the hardening dimensions:
+    # they catch coarse inclusion-only modeling and mislabeled boundaries that
+    # the anchor / coverage / grounding checks structurally miss.
     trust_score = (
-        0.30 * anchor_score
-        + 0.30 * coverage_score
-        + 0.20 * contract_score
+        0.20 * anchor_score
+        + 0.20 * coverage_score
+        + 0.15 * precision_score
+        + 0.15 * contract_score
         + 0.20 * grounding_score
+        + 0.10 * externals_score
     )
     trust_score = max(0.0, min(1.0, trust_score))
 
     trust_breakdown = {
         "anchor_score": round(anchor_score, 3),
         "coverage_score": round(coverage_score, 3),
+        "precision_score": round(precision_score, 3),
         "contract_score": round(contract_score, 3),
         "grounding_score": round(grounding_score, 3),
+        "externals_score": round(externals_score, 3),
         "non_external_components": len(non_ext),
+        "non_external_leaves": len(non_ext_leaves),
         "leaf_symbols_in_skeleton": len(leaf_symbols),
         "flow_edges": len(flow_edges),
         "flow_ref_edges": len(ref_flow_edges),
@@ -574,6 +739,8 @@ def discrepancy_reconciler(state: VerificationState) -> VerifiedModel:
         "coverage_findings": len(state.coverage_findings),
         "contract_findings": len(state.contract_findings),
         "grounding_findings": len(state.grounding_findings),
+        "precision_findings": len(state.precision_findings),
+        "external_findings": len(state.external_findings),
     }
 
     return VerifiedModel(
@@ -583,6 +750,8 @@ def discrepancy_reconciler(state: VerificationState) -> VerifiedModel:
         coverage_findings=state.coverage_findings,
         contract_findings=state.contract_findings,
         grounding_findings=state.grounding_findings,
+        precision_findings=state.precision_findings,
+        external_findings=state.external_findings,
         trust_score=round(trust_score, 3),
         trust_breakdown=trust_breakdown,
     )
@@ -604,6 +773,8 @@ def verify(graph: Graph, skeleton: CodeSkeleton) -> VerifiedModel:
     """
     state = location_anchor_checker(graph, skeleton)
     state = coverage_checker(state)
+    state = precision_checker(state)
     state = contract_consistency_checker(state)
     state = flow_grounding_checker(state)
+    state = externals_checker(state)
     return discrepancy_reconciler(state)
