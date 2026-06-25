@@ -753,10 +753,67 @@ class LiftContext:
     flows: list
 
 
+def _filter_skeleton_to_scope(skeleton: CodeSkeleton, scope: ScopeSpec) -> CodeSkeleton:
+    """Return a new CodeSkeleton restricted to symbols that pass `_in_region`.
+
+    When scope=None the original skeleton is returned unchanged.  Otherwise only
+    symbols (and the call/dataflow edges whose *both* endpoints are in-scope) are
+    kept.  Imports and scope_classes are filtered to the in-scope importer files.
+    The full skeleton was built first so cross-file call/import *resolution* was
+    correct; this filter only narrows the *coverage universe* that verify and
+    coverage_tracker see.
+    """
+    if scope is None:
+        return skeleton
+
+    in_scope_syms = [s for s in skeleton.symbols if _in_region(s, scope)]
+    in_scope_ids = {s.id for s in in_scope_syms}
+    in_scope_paths = {s.path for s in in_scope_syms}
+
+    in_scope_calls = [
+        e for e in skeleton.call_edges
+        if e.caller_id in in_scope_ids and e.callee_id in in_scope_ids
+    ]
+    in_scope_df = [
+        e for e in skeleton.dataflow_edges
+        if e.from_callee in in_scope_ids and e.to_callee in in_scope_ids
+    ]
+    in_scope_imports = [
+        r for r in skeleton.imports if r.importer_file in in_scope_paths
+    ]
+    in_scope_resolved = [
+        r for r in skeleton.resolved if r.importer_file in in_scope_paths
+    ]
+    in_scope_scope_classes = [
+        sc for sc in skeleton.scope_classes if sc.importer_file in in_scope_paths
+    ]
+
+    # Reconstruct a minimal CodeSkeleton.  The nested stage objects (dataflow_graph)
+    # are not used by verify/coverage_tracker — only the flattened convenience views.
+    return CodeSkeleton(
+        dataflow_graph=skeleton.dataflow_graph,  # kept for completeness; not queried
+        symbols=in_scope_syms,
+        imports=in_scope_imports,
+        resolved=in_scope_resolved,
+        scope_classes=in_scope_scope_classes,
+        boundary=skeleton.boundary,
+        call_edges=in_scope_calls,
+        dataflow_edges=in_scope_df,
+    )
+
+
 def prepare_lift(source_root: str, scope: ScopeSpec = None) -> LiftContext:
     """Ingest + skeleton + the four region prep passes, bundled for one operator
-    session. scope=None is the whole-codebase single pass."""
-    skeleton = build_skeleton(ingest(source_root), source_root)
+    session. scope=None is the whole-codebase single pass.
+
+    The full skeleton is built first so cross-file call/import resolution is
+    correct even for in-scope files that import out-of-scope helpers.  When
+    scope is set, the cached skeleton is then filtered to the scope prefix so
+    that out-of-scope symbols (e.g. a tests/ directory) are NOT counted as
+    uncovered by translate_coverage / translate_verify.
+    """
+    full_skeleton = build_skeleton(ingest(source_root), source_root)
+    skeleton = _filter_skeleton_to_scope(full_skeleton, scope)
     region = scope_slicer(skeleton, scope, source_root=source_root)
     return LiftContext(
         source_root=source_root,

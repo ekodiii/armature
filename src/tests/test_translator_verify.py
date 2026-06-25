@@ -6,6 +6,7 @@ import pytest
 
 from models import Component, Edge, EdgeType, FileLocation, Graph
 from store import add_component, add_edge
+from translator.lift import _filter_skeleton_to_scope, prepare_lift
 from translator.skeleton import build_skeleton
 from translator.source_ingestion import ingest
 from translator.verify import (
@@ -178,3 +179,108 @@ def test_external_node_suppresses_external_finding(tmp_path):
     vm = verify(g, skel)
     assert vm.external_findings == []
     assert vm.trust_breakdown["externals_score"] == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Scope filtering: out-of-scope symbols must NOT appear as uncovered
+# --------------------------------------------------------------------------- #
+
+def _make_pkg_tests_tree(tmp_path):
+    """Two directories: pkg/ (in-scope) and tests/ (out-of-scope)."""
+    files = {
+        "pkg/__init__.py": "",
+        "pkg/core.py": "def do_thing():\n    return 1\n\ndef helper():\n    return 2\n",
+        "tests/__init__.py": "",
+        "tests/test_core.py": (
+            "from pkg.core import do_thing\n\n"
+            "def test_do_thing():\n    assert do_thing() == 1\n"
+        ),
+    }
+    for rel, text in files.items():
+        fp = tmp_path / rel
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(text)
+    return str(tmp_path)
+
+
+def test_scope_filter_excludes_out_of_scope_symbols(tmp_path):
+    """_filter_skeleton_to_scope with scope='pkg/' must not include tests/ symbols."""
+    root = _make_pkg_tests_tree(tmp_path)
+    full_skel = build_skeleton(ingest(root), root)
+    filtered = _filter_skeleton_to_scope(full_skel, "pkg/")
+
+    full_paths = {s.path for s in full_skel.symbols}
+    filtered_paths = {s.path for s in filtered.symbols}
+
+    # Full skeleton sees both trees
+    assert any(p.startswith("tests/") for p in full_paths)
+    assert any(p.startswith("pkg/") for p in full_paths)
+
+    # Filtered skeleton sees only pkg/
+    assert not any(p.startswith("tests/") for p in filtered_paths), (
+        "tests/ symbols leaked into scope-filtered skeleton"
+    )
+    assert any(p.startswith("pkg/") for p in filtered_paths)
+
+
+def test_scope_filter_none_returns_all_symbols(tmp_path):
+    """scope=None must keep the full skeleton unchanged."""
+    root = _make_pkg_tests_tree(tmp_path)
+    full_skel = build_skeleton(ingest(root), root)
+    filtered = _filter_skeleton_to_scope(full_skel, None)
+    assert filtered is full_skel  # must be the same object
+
+
+def test_scoped_verify_does_not_penalise_tests_dir(tmp_path):
+    """translate_verify scoped to pkg/ must not report tests/ symbols as uncovered."""
+    root = _make_pkg_tests_tree(tmp_path)
+    # Build a skeleton scoped to pkg/ only (the fix path)
+    full_skel = build_skeleton(ingest(root), root)
+    scoped_skel = _filter_skeleton_to_scope(full_skel, "pkg/")
+
+    # Graph covers all of pkg/ with one component
+    g = Graph.new()
+    add_component(g, Component(
+        "pkg_core", "d", "p", ["t"], ["t"], 0,
+        locations=[FileLocation("pkg/core.py")],
+    ))
+    vm = verify(g, scoped_skel)
+
+    uncovered_subjects = {f.subject for f in vm.coverage_findings if f.kind == "uncovered_symbol"}
+    tests_uncovered = [s for s in uncovered_subjects if s.startswith("tests/")]
+    assert tests_uncovered == [], (
+        f"tests/ symbols reported as uncovered when scope='pkg/': {tests_uncovered}"
+    )
+
+
+def test_unscoped_verify_includes_tests_dir(tmp_path):
+    """Without scope (scope=None), tests/ symbols ARE counted as uncovered when
+    the graph only covers pkg/ — confirming scope=None behavior is unchanged."""
+    root = _make_pkg_tests_tree(tmp_path)
+    full_skel = build_skeleton(ingest(root), root)
+
+    # Graph covers only pkg/
+    g = Graph.new()
+    add_component(g, Component(
+        "pkg_core", "d", "p", ["t"], ["t"], 0,
+        locations=[FileLocation("pkg/core.py")],
+    ))
+    vm = verify(g, full_skel)
+
+    uncovered_subjects = {f.subject for f in vm.coverage_findings if f.kind == "uncovered_symbol"}
+    tests_uncovered = [s for s in uncovered_subjects if s.startswith("tests/")]
+    assert len(tests_uncovered) > 0, (
+        "Expected tests/ symbols to be uncovered when scope=None and graph only covers pkg/"
+    )
+
+
+def test_prepare_lift_scope_skeleton_excludes_out_of_scope(tmp_path):
+    """prepare_lift(root, scope='pkg/') must cache a skeleton that excludes tests/ symbols
+    so that coverage_tracker / verify report correctly."""
+    root = _make_pkg_tests_tree(tmp_path)
+    ctx = prepare_lift(root, scope="pkg/")
+
+    skel_paths = {s.path for s in ctx.skeleton.symbols}
+    assert not any(p.startswith("tests/") for p in skel_paths), (
+        "prepare_lift cached skeleton includes out-of-scope tests/ symbols"
+    )
