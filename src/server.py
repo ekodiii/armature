@@ -79,6 +79,7 @@ from graph_warnings import (
 )
 from writer import (
     delete_component as _delete_component,
+    delete_edge as _delete_edge,
     mark_implemented as _mark_implemented,
     propose_component as _propose_component,
     propose_edge as _propose_edge,
@@ -1008,6 +1009,30 @@ def propose_edge(edge_type: str, from_id: str, to_id: str) -> dict:
         return {"ok": False, "errors": errors}
     _persist()
     return {"ok": True, "edge": f"{from_id} -> {to_id} ({et.value})", "active_warnings": _active_count()}
+
+
+@mcp.tool()
+def delete_edge(edge_type: str, from_id: str, to_id: str) -> dict:
+    """Remove a single edge between two components — the inverse of propose_edge.
+
+    - edge_type: "FLOW" or "REFERENCE". SCOPE edges cannot be deleted directly
+      because they are derived from parent_id and managed by component parenting;
+      deleting one would desync the hierarchy. To rewire a parent relationship,
+      delete the child component and re-propose it with the new parent_id.
+    - from_id / to_id: the two endpoints. The edge id is derived as
+      "{from_id}__{to_id}__{edge_type}".
+
+    Returns {"ok": True, "active_warnings": <count>} or {"ok": False, "errors": [...]}."""
+    if GRAPH is None:
+        return _no_active()
+    et, err = _parse_edge_type(edge_type)
+    if err:
+        return err
+    errors = _delete_edge(GRAPH, Edge(et, from_id, to_id))
+    if errors:
+        return {"ok": False, "errors": errors}
+    _persist()
+    return {"ok": True, "deleted": f"{from_id} -> {to_id} ({et.value})", "active_warnings": _active_count()}
 
 
 @mcp.tool()
