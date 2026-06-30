@@ -47,6 +47,7 @@ Execution protocol (all modes):
   5. REPEAT.
 """
 
+import copy
 import dataclasses
 import json
 import os
@@ -71,7 +72,7 @@ from gitsync import (
     current_head as _current_head,
     reconcile as _reconcile,
 )
-from store import get_component as _get_component
+from store import get_component as _get_component, remove_edge as _remove_edge
 from graph_warnings import (
     get_active_warnings as _active_warnings,
     ignore_warning as _ignore_warning,
@@ -453,13 +454,15 @@ def get_component(component_id: str) -> dict:
 
 
 @mcp.tool()
-def get_neighbors(component_id: str, edge_type: str, upstream: bool = False) -> dict:
+def get_neighbors(component_id: str, edge_type: str, upstream: bool = False, terse: bool = True) -> dict:
     """Components directly connected to this one by edges of a given type.
 
     edge_type: "FLOW" (siblings exchanging data), "SCOPE" (parent/children), or
                "REFERENCE" (weak cross-boundary links).
     upstream:  False (default) follows outgoing edges -- downstream consumers /
                children. True follows incoming edges -- upstream producers / parent.
+    terse:     True (default) returns compact views (id, description, types, counts).
+               Pass False for full component dicts.
 
     Returns {"neighbors": [component, ...]} or {"error": ...}."""
     if GRAPH is None:
@@ -470,11 +473,12 @@ def get_neighbors(component_id: str, edge_type: str, upstream: bool = False) -> 
     _, err = _fetch(component_id)
     if err:
         return err
-    return {"neighbors": [_comp_dict(c) for c in _neighbors(GRAPH, component_id, et, upstream)]}
+    fmt = _terse if terse else _comp_dict
+    return {"neighbors": [fmt(c) for c in _neighbors(GRAPH, component_id, et, upstream)]}
 
 
 @mcp.tool()
-def get_references(component_id: str, incoming: bool = False) -> dict:
+def get_references(component_id: str, incoming: bool = False, terse: bool = True) -> dict:
     """Weak REFERENCE links for a component, kept separate from FLOW/SCOPE.
 
     REFERENCE edges record cross-boundary data flow (e.g. a deep child of A feeds
@@ -482,20 +486,26 @@ def get_references(component_id: str, incoming: bool = False) -> dict:
     hints and are invisible to coverage, cycle, and path logic.
 
     incoming=False returns components this one references; incoming=True returns
-    components that reference this one. Returns {"references": [...]} or {"error"}."""
+    components that reference this one.
+    terse=True (default) returns compact views; pass False for full dicts.
+
+    Returns {"references": [...]} or {"error"}."""
     if GRAPH is None:
         return _no_active()
     _, err = _fetch(component_id)
     if err:
         return err
-    return {"references": [_comp_dict(c) for c in _references(GRAPH, component_id, incoming)]}
+    fmt = _terse if terse else _comp_dict
+    return {"references": [fmt(c) for c in _references(GRAPH, component_id, incoming)]}
 
 
 @mcp.tool()
-def search_components(query: str) -> dict:
+def search_components(query: str, terse: bool = True) -> dict:
     """Find components whose id, description, or processing text contains the query
     (case-insensitive substring match -- semantic/embedding search is not yet
     wired). Useful when you know roughly what a component does but not its id.
+
+    terse=True (default) returns compact views; pass False for full dicts.
 
     Returns {"matches": [component, ...]}."""
     if GRAPH is None:
@@ -508,15 +518,18 @@ def search_components(query: str) -> dict:
         or q in c.description.lower()
         or q in c.processing.lower()
     ]
-    return {"matches": [_comp_dict(c) for c in matches]}
+    fmt = _terse if terse else _comp_dict
+    return {"matches": [fmt(c) for c in matches]}
 
 
 @mcp.tool()
-def get_subgraph(component_id: str, depth: int = -1) -> dict:
+def get_subgraph(component_id: str, depth: int = -1, terse: bool = True) -> dict:
     """The SCOPE subtree rooted at a component: the component plus its descendants
     down to `depth` levels (depth=-1, the default, means all the way down; depth=1
     means just the direct children). This is how you zoom IN on one part of the
     system without loading siblings or ancestors.
+
+    terse=True (default) returns compact views; pass False for full dicts.
 
     Returns {"components": [...]} in pre-order, or {"error": ...}."""
     if GRAPH is None:
@@ -524,7 +537,8 @@ def get_subgraph(component_id: str, depth: int = -1) -> dict:
     _, err = _fetch(component_id)
     if err:
         return err
-    return {"components": [_comp_dict(c) for c in _subgraph(GRAPH, component_id, depth)]}
+    fmt = _terse if terse else _comp_dict
+    return {"components": [fmt(c) for c in _subgraph(GRAPH, component_id, depth)]}
 
 
 @mcp.tool()
@@ -543,10 +557,12 @@ def get_path(from_id: str, to_id: str) -> dict:
 
 
 @mcp.tool()
-def get_impact(component_id: str) -> dict:
+def get_impact(component_id: str, terse: bool = True) -> dict:
     """Everything reachable from a component along FLOW edges, in both directions.
     Use this before editing to understand blast radius: who feeds this component
     (upstream) and who depends on its output (downstream).
+
+    terse=True (default) returns compact views; pass False for full dicts.
 
     Returns {"upstream": [...], "downstream": [...]} or {"error": ...}."""
     if GRAPH is None:
@@ -555,9 +571,10 @@ def get_impact(component_id: str) -> dict:
     if err:
         return err
     result = _impact(GRAPH, component_id)
+    fmt = _terse if terse else _comp_dict
     return {
-        "upstream": [_comp_dict(c) for c in result["upstream"]],
-        "downstream": [_comp_dict(c) for c in result["downstream"]],
+        "upstream": [fmt(c) for c in result["upstream"]],
+        "downstream": [fmt(c) for c in result["downstream"]],
     }
 
 
@@ -1092,6 +1109,177 @@ def _repo_head() -> Optional[str]:
         return _current_head(_project_root())
     except _GitError:
         return None
+
+
+# ===========================================================================
+# Batch mutation -- validate-then-commit, single persist
+# ===========================================================================
+def _apply_batch_op(graph: Graph, index: int, op: dict) -> dict:
+    """Apply one batch op to `graph`; returns {index, op, ok, id?, error?}.
+    Hard errors (unknown id, duplicate, bad z_level) are returned as ok=False.
+    Graph-consistency warnings are NOT checked here — only at final commit."""
+    verb = op["op"]
+
+    if verb == "propose_component":
+        locs = [
+            FileLocation(path=l["path"], start_line=l.get("start_line"), end_line=l.get("end_line"))
+            for l in (op.get("locations") or [])
+        ]
+        component = Component(
+            component_id=op["component_id"],
+            description=op["description"],
+            processing=op["processing"],
+            input_types=op["input_types"],
+            output_types=op["output_types"],
+            z_level=op["z_level"],
+            external=op.get("external", False),
+            parent_id=op.get("parent_id"),
+            locations=locs,
+            feature=op.get("feature"),
+        )
+        errors = _propose_component(graph, component)
+        if errors:
+            return {"index": index, "op": verb, "ok": False, "error": errors[0]}
+        return {"index": index, "op": verb, "ok": True, "id": op["component_id"]}
+
+    if verb == "update_component":
+        cid = op["component_id"]
+        if cid not in graph.components:
+            return {"index": index, "op": verb, "ok": False, "error": f"component '{cid}' not found"}
+        fields = dict(op["fields"])
+        if "locations" in fields:
+            fields["locations"] = [
+                FileLocation(path=l["path"], start_line=l.get("start_line"), end_line=l.get("end_line"))
+                for l in fields["locations"]
+            ]
+        errors = _update_component(graph, cid, fields)
+        if errors:
+            return {"index": index, "op": verb, "ok": False, "error": errors[0]}
+        return {"index": index, "op": verb, "ok": True, "id": cid}
+
+    if verb == "delete_component":
+        cid = op["component_id"]
+        if cid not in graph.components:
+            return {"index": index, "op": verb, "ok": False, "error": f"component '{cid}' not found"}
+        c = graph.components[cid]
+        if c.children:
+            return {"index": index, "op": verb, "ok": False, "error": f"'{cid}' still has children {c.children}"}
+        _delete_component(graph, cid)
+        return {"index": index, "op": verb, "ok": True, "id": cid}
+
+    if verb == "propose_edge":
+        et, err = _parse_edge_type(op["edge_type"])
+        if err:
+            return {"index": index, "op": verb, "ok": False, "error": err["error"]}
+        errors = _propose_edge(graph, Edge(et, op["from_id"], op["to_id"]))
+        if errors:
+            return {"index": index, "op": verb, "ok": False, "error": errors[0]}
+        return {"index": index, "op": verb, "ok": True, "id": f"{op['from_id']} -> {op['to_id']} ({et.value})"}
+
+    if verb == "delete_edge":
+        et, err = _parse_edge_type(op["edge_type"])
+        if err:
+            return {"index": index, "op": verb, "ok": False, "error": err["error"]}
+        if et == EdgeType.SCOPE:
+            return {"index": index, "op": verb, "ok": False,
+                    "error": "SCOPE edges are managed by parent_id; delete the child component instead"}
+        edge = Edge(et, op["from_id"], op["to_id"])
+        if edge.edge_id not in graph.edges:
+            return {"index": index, "op": verb, "ok": False, "error": f"edge '{edge.edge_id}' not found"}
+        _remove_edge(graph, graph.edges[edge.edge_id])
+        return {"index": index, "op": verb, "ok": True, "id": edge.edge_id}
+
+    if verb == "mark_implemented":
+        cid = op["component_id"]
+        if cid not in graph.components:
+            return {"index": index, "op": verb, "ok": False, "error": f"component '{cid}' not found"}
+        sha = _repo_head() if graph is GRAPH else None
+        _mark_implemented(graph, cid, sha=sha)
+        return {"index": index, "op": verb, "ok": True, "id": cid}
+
+    return {"index": index, "op": verb, "ok": False, "error": f"unknown op '{verb}'"}
+
+
+@mcp.tool()
+def batch_mutate(ops: list[dict]) -> dict:
+    """Apply a list of authoring operations atomically: validate all against an
+    in-memory scratch copy first, then write to the real graph and persist once.
+
+    Supported op verbs and required fields:
+      propose_component  -- component_id, description, processing, input_types,
+                            output_types, z_level (+ optional: external, parent_id,
+                            locations, feature)
+      update_component   -- component_id, fields (dict of changes)
+      delete_component   -- component_id
+      propose_edge       -- edge_type, from_id, to_id
+      delete_edge        -- edge_type, from_id, to_id
+      mark_implemented   -- component_id
+
+    Safety guarantees:
+      ATOMIC   -- any hard error aborts the whole batch; nothing is written.
+      ORDERED  -- ops run in submission order, so parent before child in a
+                  propose sequence works; delete children before parents.
+      DEFERRED -- mid-batch type gaps or hanging edges from a temporary delete
+                  are NOT checked per-op; only the final warning count matters.
+
+    Returns {ok, applied_count, results:[{index, op, ok, id?, error?}],
+    active_warnings} on success, or {ok:false, results:[...], applied_count:0}
+    with the first failing op on any hard error."""
+    if GRAPH is None:
+        return _no_active()
+
+    _KNOWN = {
+        "propose_component", "update_component", "delete_component",
+        "propose_edge", "delete_edge", "mark_implemented",
+    }
+    _REQUIRED: dict[str, list[str]] = {
+        "propose_component": ["component_id", "description", "processing", "input_types", "output_types", "z_level"],
+        "update_component":  ["component_id", "fields"],
+        "delete_component":  ["component_id"],
+        "propose_edge":      ["edge_type", "from_id", "to_id"],
+        "delete_edge":       ["edge_type", "from_id", "to_id"],
+        "mark_implemented":  ["component_id"],
+    }
+
+    # Phase 1 -- pre-flight: schema + delete-orphan guard --------------------
+    deleted_ids: set[str] = set()
+    for i, op in enumerate(ops):
+        verb = op.get("op")
+        if not verb:
+            return {"ok": False, "applied_count": 0, "results": [
+                {"index": i, "op": None, "ok": False, "error": "missing 'op' field"}]}
+        if verb not in _KNOWN:
+            return {"ok": False, "applied_count": 0, "results": [
+                {"index": i, "op": verb, "ok": False, "error": f"unknown op '{verb}'"}]}
+        for req in _REQUIRED[verb]:
+            if req not in op:
+                return {"ok": False, "applied_count": 0, "results": [
+                    {"index": i, "op": verb, "ok": False, "error": f"missing required field '{req}'"}]}
+        if verb == "delete_component":
+            cid = op["component_id"]
+            c = GRAPH.components.get(cid)
+            if c:
+                unguarded = [ch for ch in c.children if ch not in deleted_ids]
+                if unguarded:
+                    return {"ok": False, "applied_count": 0, "results": [
+                        {"index": i, "op": verb, "ok": False,
+                         "error": f"'{cid}' has children {unguarded} not deleted earlier in this batch"}]}
+            deleted_ids.add(cid)
+
+    # Phase 2 -- dry-run on a deep copy --------------------------------------
+    scratch = copy.deepcopy(GRAPH)
+    results: list[dict] = []
+    for i, op in enumerate(ops):
+        r = _apply_batch_op(scratch, i, op)
+        results.append(r)
+        if not r["ok"]:
+            return {"ok": False, "applied_count": 0, "results": results}
+
+    # Phase 3 -- commit to live graph + single persist -----------------------
+    for i, op in enumerate(ops):
+        _apply_batch_op(GRAPH, i, op)
+    _persist()
+    return {"ok": True, "applied_count": len(ops), "results": results, "active_warnings": _active_count()}
 
 
 # ===========================================================================

@@ -33,7 +33,7 @@ components:
     parent_id: null
     version: 4
     implemented_version: 4
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
     locations:
     - path: server.py
       start_line: 1
@@ -57,7 +57,7 @@ components:
     parent_id: null
     version: 2
     implemented_version: 2
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
     locations:
     - path: models.py
       start_line: 1
@@ -172,8 +172,8 @@ components:
   dispatch-authoring:
     component_id: dispatch-authoring
     description: "Mutation + reconcile handlers: propose/update/delete_component,\
-      \ propose_edge, mark_implemented (stamps git HEAD), ignore_warning, and reconcile()\
-      \ \u2014 the git-sync drift detector exposed to the operator."
+      \ propose_edge, delete_edge, mark_implemented (stamps git HEAD), ignore_warning,\
+      \ and reconcile() \u2014 the git-sync drift detector exposed to the operator."
     processing: Validates and forwards component/edge mutation requests to writer,
       then re-runs warning checks and returns updated warning counts.
     input_types:
@@ -184,13 +184,13 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 2
-    implemented_version: 2
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    version: 3
+    implemented_version: 3
+    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
     locations:
     - path: server.py
       start_line: 809
-      end_line: 1044
+      end_line: 1070
   dispatch-prompts:
     component_id: dispatch-prompts
     description: "Prompt/mode handlers: armature_plan, armature_translate, armature_implement\
@@ -207,7 +207,7 @@ components:
     parent_id: mcp-dispatch
     version: 1
     implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: server.py
       start_line: 1118
@@ -287,9 +287,11 @@ components:
       end_line: 74
   core-writer:
     component_id: core-writer
-    description: Validated mutation API; mark_implemented now stamps the current git
-      commit (implemented_sha) as the drift baseline and clears code_drifted. Validates
-      ids and the root z_level invariant.
+    description: "Validated mutation API \u2014 propose/update/delete_component, propose_edge,\
+      \ and delete_edge (removes a FLOW/REFERENCE edge; refuses SCOPE edges, which\
+      \ are parent_id-derived). mark_implemented stamps the current git commit (implemented_sha)\
+      \ as the drift baseline and clears code_drifted. Validates ids and the root\
+      \ z_level invariant."
     processing: Runs validator checks before delegating to store, enforcing structural
       rules (z-levels, parent relationships, edge constraints) on every write.
     input_types:
@@ -300,13 +302,13 @@ components:
     z_level: 1
     external: false
     parent_id: graph-core
-    version: 3
-    implemented_version: 3
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    version: 4
+    implemented_version: 4
+    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
     locations:
     - path: writer.py
       start_line: 1
-      end_line: 113
+      end_line: 136
   core-validator:
     component_id: core-validator
     description: "Structural integrity checker \u2014 validate_edge, validate_component,\
@@ -997,14 +999,16 @@ components:
   trans-verify:
     component_id: trans-verify
     description: "Structural FIDELITY stage (not semantic proof): validates a graph\
-      \ against the CodeSkeleton on anchors, symbol coverage, type-string contract\
-      \ chaining, and FLOW/REFERENCE grounding, aggregating a trust score. Confirms\
-      \ the design faithfully maps the code's structure; it does NOT prove the code\
-      \ computes the right thing \u2014 that is verification-router's job."
-    processing: Runs five sequential checkers (location-anchor, coverage, contract,
-      flow-grounding, reconciler) threading VerificationState through each pass, consuming
-      SemanticModel and CodeSkeleton, and producing a VerifiedModel with all findings
-      attached.
+      \ against the CodeSkeleton across seven checks \u2014 anchor honesty, symbol\
+      \ coverage, leaf PRECISION (coarse inclusion-only blobs), type-string contract\
+      \ chaining, FLOW/REFERENCE grounding, and EXTERNAL-boundary representation \u2014\
+      \ aggregating a weighted trust score. Confirms the design faithfully maps the\
+      \ code's structure; it does NOT prove the code computes the right thing (verification-router's\
+      \ job)."
+    processing: Runs seven sequential checkers (location-anchor, coverage, precision,
+      contract, flow-grounding, externals, reconciler) threading VerificationState
+      through each pass, consuming SemanticModel and CodeSkeleton, producing a VerifiedModel
+      with all findings and six weighted sub-scores.
     input_types:
     - SemanticModel
     - CodeSkeleton
@@ -1013,13 +1017,13 @@ components:
     z_level: 1
     external: false
     parent_id: translator-pipeline
-    version: 2
-    implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 3
+    implemented_version: 3
+    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: translator/verify.py
       start_line: 1
-      end_line: 609
+      end_line: 780
   verify-location-anchor:
     component_id: verify-location-anchor
     description: Checks that every SemanticModel node has at least one valid CodeSkeleton
@@ -1034,13 +1038,13 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 1
-    implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 2
+    implemented_version: 2
+    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: translator/verify.py
-      start_line: 132
-      end_line: 199
+      start_line: 173
+      end_line: 240
   verify-coverage:
     component_id: verify-coverage
     description: Checks that every symbol in the CodeSkeleton is covered by at least
@@ -1054,13 +1058,13 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 1
-    implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 2
+    implemented_version: 2
+    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: translator/verify.py
-      start_line: 206
-      end_line: 301
+      start_line: 247
+      end_line: 342
   verify-contract:
     component_id: verify-contract
     description: Checks that input/output type contracts declared on SemanticModel
@@ -1075,13 +1079,13 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 1
-    implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 2
+    implemented_version: 2
+    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: translator/verify.py
-      start_line: 308
-      end_line: 361
+      start_line: 349
+      end_line: 402
   verify-flow-grounding:
     component_id: verify-flow-grounding
     description: Checks that every FLOW/REFERENCE edge in the SemanticModel has a
@@ -1098,23 +1102,25 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 1
-    implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 2
+    implemented_version: 2
+    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: translator/verify.py
-      start_line: 368
-      end_line: 492
+      start_line: 409
+      end_line: 533
   verify-reconciler:
     component_id: verify-reconciler
-    description: "Aggregates all VerificationState findings into a VerifiedModel with\
-      \ a weighted trust score. The grounding sub-score now counts only ungrounded\
-      \ findings against the verifiable-edge denominator (unverifiable edges excluded\
-      \ from both), and is clamped to [0,1] \u2014 fixing the prior double-count that\
-      \ could go negative."
-    processing: Collects anchor, coverage, contract, and flow-grounding findings from
-      VerificationState, classifies them as errors/warnings/info, and emits a VerifiedModel
-      with the original SemanticModel plus the structured findings report.
+    description: 'Aggregates all VerificationState findings into a VerifiedModel with
+      a weighted trust score across SIX dimensions: anchor (0.20), coverage (0.20),
+      precision (0.15), contract (0.15), grounding (0.20), externals (0.10). precision_score
+      = 1 - coarse-leaf prevalence over non-external leaves; externals_score = 0 when
+      third-party boundaries exist but the graph models no external node. Grounding
+      still counts only ungrounded findings against the verifiable-edge denominator,
+      clamped to [0,1].'
+    processing: Computes precision_score and externals_score, blends six weighted
+      sub-scores into trust_score, and emits a VerifiedModel carrying anchor/coverage/contract/grounding/precision/external
+      findings plus the sub-score breakdown.
     input_types:
     - VerificationState
     output_types:
@@ -1122,18 +1128,22 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 1
-    implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 2
+    implemented_version: 2
+    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: translator/verify.py
-      start_line: 499
-      end_line: 609
+      start_line: 643
+      end_line: 757
   trans-lifter:
     component_id: trans-lifter
-    description: "Operator-driven semantic lift stage (planned) \u2014 elevates a\
-      \ CodeSkeleton into a SemanticModel by grouping anchored symbols into responsibility-driven\
-      \ components with named contracts, completed edges, and intent descriptions."
+    description: "Operator-driven semantic lift stage \u2014 elevates a CodeSkeleton\
+      \ into a SemanticModel by grouping anchored symbols into responsibility-driven\
+      \ components with named contracts, completed edges, and intent descriptions.\
+      \ Includes prepare_lift (the driver) and _filter_skeleton_to_scope, which narrows\
+      \ the cached CodeSkeleton to the scope path-prefix so coverage/verify judge\
+      \ only in-scope files (fixes translate_prepare counting out-of-scope files like\
+      \ tests/ as uncovered)."
     processing: "Runs five sequential lift passes (abstraction-planner, contract-recoverer,\
       \ flow-completer, intent-describer, consolidator) threading intermediate representations\
       \ from CodeSkeleton to SemanticModel. Not yet implemented \u2014 operator-driven\
@@ -1145,13 +1155,13 @@ components:
     z_level: 1
     external: false
     parent_id: translator-pipeline
-    version: 2
-    implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 3
+    implemented_version: 3
+    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
     locations:
     - path: translator/lift.py
       start_line: 1
-      end_line: 768
+      end_line: 825
   lift-abstraction-planner:
     component_id: lift-abstraction-planner
     description: Groups anchored symbols by responsibility into candidate components.
@@ -1378,7 +1388,7 @@ components:
     parent_id: mcp-dispatch
     version: 2
     implemented_version: 2
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
     locations:
     - path: server.py
       start_line: 996
@@ -1386,9 +1396,11 @@ components:
   test-suite:
     component_id: test-suite
     description: "Pytest regression suite (tests/) exercising the graph engine and\
-      \ translator. 57 tests across test_graph_core, test_serializer, test_warnings,\
-      \ test_translator_skeleton, test_translator_verify \u2014 each bug fixed in\
-      \ the hardening pass has a named regression test. Run via `uv run pytest`."
+      \ translator. 88 tests across test_graph_core, test_serializer, test_warnings,\
+      \ test_translator_skeleton, test_translator_verify, test_gitsync, test_features\
+      \ \u2014 each bug fixed or check added has a named regression test, including\
+      \ the verifier precision/externals hardening, the translate-scope fix, and the\
+      \ delete_edge tool. Run via `uv run pytest`."
     processing: 'Imports the flat modules (pythonpath=src), builds synthetic graphs
       and source trees, and asserts behavior: id/structural validation, cycle detection,
       save/load round-trip + dangling-ref errors, each warning type + per-cycle id,
@@ -1401,9 +1413,9 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 1
-    implemented_version: 1
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    version: 3
+    implemented_version: 3
+    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
     locations:
     - path: tests/test_graph_core.py
       start_line: null
@@ -1460,7 +1472,7 @@ components:
     parent_id: null
     version: 1
     implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
     locations:
     - path: gitsync.py
       start_line: 1
@@ -1627,6 +1639,206 @@ components:
     implemented_sha: null
     feature: verification-router
     locations: []
+  verify-precision:
+    component_id: verify-precision
+    description: "Flags LEAF nodes that 'cover' many files/symbols with no decomposition\
+      \ \u2014 the inclusion-only blob pattern that fakes coverage and defeats edge\
+      \ grounding (any-symbol-to-any-symbol matching over a huge set almost always\
+      \ finds an incidental link)."
+    processing: For each non-external leaf component, counts distinct anchored files
+      and covered leaf symbols; emits a PrecisionFinding when files>4 or covered symbols>40.
+      Appends findings to VerificationState. Thresholds calibrated so focused hand-authored
+      leaves pass while whole-subpackage blobs are flagged.
+    input_types:
+    - VerificationState
+    output_types:
+    - VerificationState
+    z_level: 2
+    external: false
+    parent_id: trans-verify
+    version: 0
+    implemented_version: 0
+    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    locations:
+    - path: translator/verify.py
+      start_line: 549
+      end_line: 588
+  verify-externals:
+    component_id: verify-externals
+    description: "Flags real external boundaries (third-party dependencies) that are\
+      \ not modeled as external nodes. Conservative: fires only when the codebase\
+      \ imports third-party modules yet the graph has ZERO external components \u2014\
+      \ the gross failure mode."
+    processing: Collects third-party modules from the skeleton's scope_classes; if
+      the graph models no external node, emits an ExternalFinding per unmodeled boundary
+      (capped at 15, ranked by importer count). Appends findings to VerificationState.
+    input_types:
+    - VerificationState
+    output_types:
+    - VerificationState
+    z_level: 2
+    external: false
+    parent_id: trans-verify
+    version: 0
+    implemented_version: 0
+    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    locations:
+    - path: translator/verify.py
+      start_line: 595
+      end_line: 636
+  dispatch-batch:
+    component_id: dispatch-batch
+    description: "Batch mutation tool surface \u2014 a single `batch_mutate(ops)`\
+      \ MCP tool that accepts a list of heterogeneous authoring operations and applies\
+      \ them atomically: validate all against an in-memory scratch copy first, then\
+      \ write to the real graph and persist once on success."
+    processing: Receives a list of ops (`propose_component`, `update_component`, `delete_component`,
+      `propose_edge`, `delete_edge`, `mark_implemented`). Deep-copies the active graph,
+      replays all ops through the same writer functions against the copy (fail-fast
+      on any validation error, aborting the whole batch). On full success, replays
+      against the real graph and calls _persist() once. Returns {ok, applied_count,
+      results:[{index, op, ok, id?, error?}], active_warnings}.
+    input_types:
+    - BatchOps
+    output_types:
+    - BatchMutationResult
+    z_level: 1
+    external: false
+    parent_id: mcp-dispatch
+    version: 1
+    implemented_version: 1
+    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    feature: batch-crud
+    locations:
+    - path: server.py
+      start_line: 1188
+      end_line: 1266
+  batch-op-validator:
+    component_id: batch-op-validator
+    description: 'Pre-flight validator for a batch op list: deserializes each op dict,
+      checks required fields per op type, sorts deletions (children before parents),
+      and returns ordered `MutationRequest` list or a structured error per op index.'
+    processing: 'For each op dict: check `op` key is a known verb; validate required
+      fields are present (e.g. component_id for delete, full spec for propose); for
+      delete_component ops, verify that any children are also in the batch (otherwise
+      reject whole batch). Returns an ordered list ready for dry-run replay, or a
+      list of {index, error} for the first violation found.'
+    input_types:
+    - BatchOps
+    output_types:
+    - MutationRequest
+    - ValidationError
+    z_level: 2
+    external: false
+    parent_id: dispatch-batch
+    version: 1
+    implemented_version: 1
+    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    feature: batch-crud
+    locations:
+    - path: server.py
+      start_line: 1228
+      end_line: 1251
+  batch-dry-run:
+    component_id: batch-dry-run
+    description: 'Dry-run executor: replays the ordered MutationRequest list against
+      a deep copy of the active graph using the same writer functions, collecting
+      per-op results. Aborts at the first error and returns the failing index.'
+    processing: "Deep-copies the active Graph. Iterates over the MutationRequest list\
+      \ in order, calling the matching writer function against the copy. Two error\
+      \ classes with different timing: (1) HARD errors \u2014 unknown op verb, component\
+      \ doesn't exist, duplicate id, invalid z_level \u2014 abort immediately at the\
+      \ failing index and return {index, op, ok:false, error}; (2) GRAPH CONSISTENCY\
+      \ \u2014 warning-level issues like hanging edges or type gaps that may be temporarily\
+      \ broken mid-batch but resolved by later ops \u2014 NOT checked per-op. On full\
+      \ replay success (zero hard errors), returns the mutated scratch copy plus a\
+      \ results list of {index, op, ok:true, id}. Graph consistency is checked once\
+      \ by batch-commit after all ops land."
+    input_types:
+    - MutationRequest
+    - Graph
+    output_types:
+    - Graph
+    - ValidationError
+    z_level: 2
+    external: false
+    parent_id: dispatch-batch
+    version: 2
+    implemented_version: 2
+    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    feature: batch-crud
+    locations:
+    - path: server.py
+      start_line: 1101
+      end_line: 1186
+    - path: server.py
+      start_line: 1253
+      end_line: 1260
+  batch-commit:
+    component_id: batch-commit
+    description: 'Commit phase: replays the validated MutationRequest list against
+      the live graph (identical replay as dry-run, guaranteed to succeed) then calls
+      _persist() once.'
+    processing: Receives the ordered MutationRequest list only after batch-dry-run
+      confirms zero errors. Replays against the real GRAPH in submission order using
+      the same writer calls. After the final op, calls _persist() and runs _active_count()
+      to get the fresh warning count. Returns BatchMutationResult with ok:true, applied_count,
+      per-op results, and active_warnings.
+    input_types:
+    - MutationRequest
+    - Graph
+    output_types:
+    - BatchMutationResult
+    z_level: 2
+    external: false
+    parent_id: dispatch-batch
+    version: 1
+    implemented_version: 1
+    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    feature: batch-crud
+    locations:
+    - path: server.py
+      start_line: 1262
+      end_line: 1266
+  dispatch-query-terse:
+    component_id: dispatch-query-terse
+    description: 'Terse-mode additions to the five query tools that currently return
+      full component dicts: get_neighbors, get_subgraph, get_impact, search_components,
+      get_references. Adds terse: bool = True (default True) to each, routing output
+      through the existing _terse() shaper.'
+    processing: "Each tool gains a `terse` parameter (default True \u2014 opt-in to\
+      \ verbose, not opt-in to terse). When terse=True, each component in the response\
+      \ is serialized via _terse() (id + one-line description + types + child/edge\
+      \ counts) instead of the full _comp_dict(). Callers that need the full spec\
+      \ for a specific node can follow up with get_component(id). No new shaping logic\
+      \ needed \u2014 _terse() and query-response-shaper already exist."
+    input_types:
+    - McpToolCall
+    output_types:
+    - ShapedView
+    z_level: 1
+    external: false
+    parent_id: mcp-dispatch
+    version: 1
+    implemented_version: 1
+    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    feature: query-terse
+    locations:
+    - path: server.py
+      start_line: 457
+      end_line: 478
+    - path: server.py
+      start_line: 481
+      end_line: 502
+    - path: server.py
+      start_line: 503
+      end_line: 525
+    - path: server.py
+      start_line: 526
+      end_line: 543
+    - path: server.py
+      start_line: 560
+      end_line: 578
 edges:
 - edge_type: FLOW
   from_id: llm-operator
@@ -1803,14 +2015,8 @@ edges:
   from_id: verify-location-anchor
   to_id: verify-coverage
 - edge_type: FLOW
-  from_id: verify-coverage
-  to_id: verify-contract
-- edge_type: FLOW
   from_id: verify-contract
   to_id: verify-flow-grounding
-- edge_type: FLOW
-  from_id: verify-flow-grounding
-  to_id: verify-reconciler
 - edge_type: FLOW
   from_id: lift-abstraction-planner
   to_id: lift-contract-recoverer
@@ -1889,6 +2095,33 @@ edges:
 - edge_type: REFERENCE
   from_id: verification-router
   to_id: test-suite
+- edge_type: FLOW
+  from_id: verify-coverage
+  to_id: verify-precision
+- edge_type: FLOW
+  from_id: verify-precision
+  to_id: verify-contract
+- edge_type: FLOW
+  from_id: verify-flow-grounding
+  to_id: verify-externals
+- edge_type: FLOW
+  from_id: verify-externals
+  to_id: verify-reconciler
+- edge_type: REFERENCE
+  from_id: dispatch-batch
+  to_id: core-writer
+- edge_type: FLOW
+  from_id: batch-op-validator
+  to_id: batch-dry-run
+- edge_type: FLOW
+  from_id: batch-dry-run
+  to_id: batch-commit
+- edge_type: REFERENCE
+  from_id: dispatch-query-terse
+  to_id: query-topology
+- edge_type: REFERENCE
+  from_id: dispatch-query-terse
+  to_id: query-component-lookup
 warnings:
 - id: hanging_output__mcp-dispatch
   ignore_reason: McpToolResponse is the terminal output returned to the LLM operator
@@ -2087,4 +2320,4 @@ warnings:
     \ by any single entry/exit child node. Justified gap."
 - id: flow_cycle__filesystem_graph-core_translator-pipeline
   ignore_reason: Pre-existing intentional job-queue/architecture loop.
-last_synced_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+last_synced_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
