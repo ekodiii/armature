@@ -14,7 +14,7 @@ import pytest
 from models import Component, Edge, EdgeType, Graph
 from store import add_component, add_edge
 from validator import detect_cycles, validate_consistency
-from writer import propose_component, propose_edge, update_component, delete_component
+from writer import propose_component, propose_edge, update_component, delete_component, delete_edge
 
 
 def comp(cid, z=0, parent=None, itypes=("t",), otypes=("t",), external=False):
@@ -196,6 +196,54 @@ def test_delete_removes_incident_edges():
     assert "b" not in g.components
     assert not any("b" in eid.split("__") for eid in g.edges)
     assert validate_consistency(g) == []
+
+
+# --------------------------------------------------------------------------- #
+# delete_edge
+# --------------------------------------------------------------------------- #
+
+def test_delete_flow_edge_removes_edge_and_updates_endpoints():
+    g = flow_graph(("a", "b"), ("b", "c"))
+    errs = delete_edge(g, Edge(EdgeType.FLOW, "a", "b"))
+    assert errs == []
+    assert "a__b__FLOW" not in g.edges
+    # endpoints updated
+    assert "a__b__FLOW" not in g.components["a"].edges_out
+    assert "a__b__FLOW" not in g.components["b"].edges_in
+    # unrelated edge still intact
+    assert "b__c__FLOW" in g.edges
+    assert validate_consistency(g) == []
+
+
+def test_delete_nonexistent_edge_errors():
+    g = flow_graph(("a", "b"))
+    errs = delete_edge(g, Edge(EdgeType.FLOW, "a", "c"))
+    assert errs
+    assert "does not exist" in errs[0]
+
+
+def test_delete_scope_edge_is_refused():
+    g = Graph.new()
+    propose_component(g, comp("p"))
+    propose_component(g, comp("c", z=1, parent="p"))
+    errs = delete_edge(g, Edge(EdgeType.SCOPE, "p", "c"))
+    assert errs
+    assert "SCOPE" in errs[0]
+    # scope edge must still be present
+    assert "p__c__SCOPE" in g.edges
+
+
+def test_delete_edge_round_trip(tmp_path):
+    """After deleting a FLOW edge and serializing, the edge is absent on reload."""
+    from serializer import load_graph, save_graph
+    g = flow_graph(("a", "b"), ("b", "c"))
+    delete_edge(g, Edge(EdgeType.FLOW, "a", "b"))
+    p = tmp_path / "g.yaml"
+    save_graph(g, str(p))
+    g2 = load_graph(str(p))
+    assert "a__b__FLOW" not in g2.edges
+    assert "b__c__FLOW" in g2.edges
+    assert validate_consistency(g2) == []
 
 
 # --------------------------------------------------------------------------- #

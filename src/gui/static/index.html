@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Armature Graph Viewer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0f172a;
+    --panel:     #1e293b;
+    --border:    #334155;
+    --text:      #f8fafc;
+    --text-dim:  #94a3b8;
+    --accent:    #38bdf8;
+
+    --planned:   #6366f1;
+    --impl:      #22c55e;
+    --stale:     #f59e0b;
+    --drifted:   #ef4444;
+    --external:  #94a3b8;
+
+    --font-mono: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 13px; overflow: hidden; }
+
+  /* ── Layout shell ─────────────────────────────────────────── */
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ── Toolbar ──────────────────────────────────────────────── */
+  #toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--border);
+    z-index: 10; flex-shrink: 0;
+  }
+  #toolbar select, #toolbar input[type=text] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 5px; padding: 3px 8px; font-size: 12px; height: 26px;
+  }
+  #toolbar select { min-width: 140px; }
+  #search { width: 180px; }
+  .tb-label { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+  #depth-slider { width: 90px; accent-color: var(--accent); cursor: pointer; }
+  #fit-btn {
+    background: var(--border); color: var(--text); border: none;
+    border-radius: 5px; padding: 3px 10px; cursor: pointer; font-size: 12px; height: 26px;
+  }
+  #fit-btn:hover { background: #475569; }
+
+  .status-filters { display: flex; gap: 6px; align-items: center; }
+  .sf-check { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .sf-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .sf-check input { display: none; }
+  .sf-check.off .sf-dot { opacity: 0.3; }
+
+  #warn-badge {
+    margin-left: auto; background: var(--drifted); color: #fff;
+    border-radius: 12px; padding: 1px 8px; font-size: 11px; font-weight: 700;
+    cursor: pointer; white-space: nowrap; border: none;
+    display: none;
+  }
+  #warn-badge.visible { display: inline-block; }
+  #warn-badge.zero { background: var(--border); color: var(--text-dim); }
+
+  /* ── Main area ────────────────────────────────────────────── */
+  #main { display: flex; flex: 1; overflow: hidden; position: relative; }
+
+  /* ── Canvas ───────────────────────────────────────────────── */
+  #canvas-wrap {
+    flex: 1; overflow: hidden; position: relative; cursor: default;
+    user-select: none;
+  }
+  #graph-svg {
+    width: 100%; height: 100%; display: block;
+  }
+  #viewport { /* transformed group */ }
+
+  /* tooltip */
+  #tooltip {
+    position: fixed; background: #1e293b; border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 10px; font-size: 11px; pointer-events: none;
+    max-width: 260px; z-index: 100; display: none; line-height: 1.5;
+  }
+  #tooltip.visible { display: block; }
+
+  /* ── Inspector panel ──────────────────────────────────────── */
+  #inspector {
+    width: 320px; flex-shrink: 0; background: var(--panel);
+    border-left: 1px solid var(--border); overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
+  #inspector-inner { padding: 14px; flex: 1; }
+  .empty-state { color: var(--text-dim); text-align: center; margin-top: 60px; font-size: 13px; }
+
+  .insp-id {
+    font-family: var(--font-mono); font-size: 14px; font-weight: 700;
+    word-break: break-all; margin-bottom: 8px; color: var(--text);
+  }
+  .badge-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .badge {
+    border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 600;
+    color: #fff; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .badge-planned  { background: var(--planned); }
+  .badge-implemented { background: var(--impl); }
+  .badge-stale    { background: var(--stale); }
+  .badge-drifted  { background: var(--drifted); }
+  .badge-external { background: var(--external); }
+  .badge-level    { background: #334155; }
+
+  .insp-section { margin-bottom: 12px; }
+  .insp-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-dim); margin-bottom: 4px;
+  }
+  .insp-text { font-size: 12px; line-height: 1.6; white-space: pre-wrap; color: var(--text); }
+  .type-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .type-chip {
+    font-family: var(--font-mono); font-size: 10px; padding: 2px 7px;
+    background: #0f172a; border: 1px solid var(--border); border-radius: 4px;
+    color: var(--accent);
+  }
+
+  .warn-chip {
+    font-size: 10px; padding: 2px 7px; background: #451a03;
+    border: 1px solid #92400e; border-radius: 4px; color: #fcd34d;
+    margin-bottom: 4px; display: inline-block;
+  }
+
+  /* neighbor chips */
+  .nbr-section { margin-bottom: 10px; }
+  .nbr-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+  .nbr-chip {
+    font-family: var(--font-mono); font-size: 10px; padding: 3px 8px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); cursor: pointer; transition: border-color .15s;
+  }
+  .nbr-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Warning drawer ───────────────────────────────────────── */
+  #warning-drawer {
+    position: fixed; bottom: 0; left: 0; right: 320px;
+    background: var(--panel); border-top: 2px solid var(--stale);
+    max-height: 0; overflow: hidden;
+    transition: max-height .25s ease;
+    z-index: 20;
+  }
+  #warning-drawer.open { max-height: 260px; overflow-y: auto; }
+  #drawer-inner { padding: 10px 14px 14px; }
+  #drawer-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  #drawer-title { font-weight: 700; font-size: 13px; color: var(--stale); }
+  #drawer-close {
+    background: none; border: none; color: var(--text-dim);
+    font-size: 18px; cursor: pointer; line-height: 1;
+  }
+  .wg-type { font-size: 11px; font-weight: 700; color: var(--text-dim); margin: 8px 0 4px; text-transform: uppercase; letter-spacing: .05em; }
+  .wg-affected { display: flex; flex-wrap: wrap; gap: 5px; }
+  .wg-chip {
+    font-family: var(--font-mono); font-size: 10px; padding: 2px 7px;
+    background: #451a03; border: 1px solid #92400e; border-radius: 4px;
+    color: #fcd34d; cursor: pointer;
+  }
+  .wg-chip:hover { border-color: var(--stale); }
+
+  /* SVG node styles (set inline but scoped here for reference) */
+  svg text { dominant-baseline: central; }
+
+  /* ── Breadcrumb ───────────────────────────────────────────── */
+  #breadcrumb {
+    display: none; align-items: center; gap: 4px; flex-wrap: wrap;
+    padding: 5px 14px; background: #0a1120;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px; font-family: var(--font-mono); flex-shrink: 0;
+  }
+  #breadcrumb.visible { display: flex; }
+  .crumb { color: var(--text-dim); cursor: pointer; padding: 2px 7px; border-radius: 4px; }
+  .crumb:hover { color: var(--text); background: var(--border); }
+  .crumb.active { color: var(--accent); cursor: default; pointer-events: none; }
+  .crumb-sep { color: #334155; user-select: none; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Toolbar ─────────────────────────────────────────────── -->
+  <div id="toolbar">
+    <span class="tb-label">Graph</span>
+    <select id="graph-select"></select>
+
+    <span class="tb-label">Search</span>
+    <input type="text" id="search" placeholder="component id / desc…">
+
+    <span class="tb-label">Depth</span>
+    <input type="range" id="depth-slider" min="0" max="5" value="5" step="1">
+    <span id="depth-val" class="tb-label">all</span>
+
+    <div class="status-filters">
+      <label class="sf-check" data-status="planned">
+        <input type="checkbox" checked>
+        <span class="sf-dot" style="background:var(--planned)"></span>planned
+      </label>
+      <label class="sf-check" data-status="implemented">
+        <input type="checkbox" checked>
+        <span class="sf-dot" style="background:var(--impl)"></span>impl
+      </label>
+      <label class="sf-check" data-status="stale">
+        <input type="checkbox" checked>
+        <span class="sf-dot" style="background:var(--stale)"></span>stale
+      </label>
+      <label class="sf-check" data-status="drifted">
+        <input type="checkbox" checked>
+        <span class="sf-dot" style="background:var(--drifted)"></span>drifted
+      </label>
+    </div>
+
+    <button id="fit-btn">Fit</button>
+    <button id="warn-badge">⚠ 0</button>
+  </div>
+
+  <!-- ── Breadcrumb ────────────────────────────────────────── -->
+  <div id="breadcrumb"></div>
+
+  <!-- ── Main ────────────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- Canvas -->
+    <div id="canvas-wrap">
+      <svg id="graph-svg" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#94a3b8"/>
+          </marker>
+          <marker id="arrow-flow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#38bdf8"/>
+          </marker>
+        </defs>
+        <g id="viewport"></g>
+      </svg>
+    </div>
+
+    <!-- Inspector -->
+    <div id="inspector">
+      <div id="inspector-inner">
+        <div class="empty-state">Click a node to inspect</div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+
+  <!-- Warning drawer -->
+  <div id="warning-drawer">
+    <div id="drawer-inner">
+      <div id="drawer-header">
+        <span id="drawer-title">Active Warnings</span>
+        <button id="drawer-close">×</button>
+      </div>
+      <div id="drawer-body"></div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<div id="tooltip"></div>
+
+<script type="module">
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════════════════════════════
+const NODE_W = 180, NODE_H = 64, H_GAP = 40, V_GAP = 100, MARGIN = 60;
+const STATUS_COLOR = {
+  planned:     '#6366f1',
+  implemented: '#22c55e',
+  stale:       '#f59e0b',
+  drifted:     '#ef4444',
+};
+const EXTERNAL_COLOR = '#94a3b8';
+
+// ═══════════════════════════════════════════════════════════════
+// Module-level state
+// ═══════════════════════════════════════════════════════════════
+const state = {
+  snapshot:          null,   // GraphSnapshot | null
+  selectedId:        null,   // string | null
+  viewDepth:         999,    // max z_level to show (999 = all)
+  statusFilter:      { planned: true, implemented: true, stale: true, drifted: true },
+  searchQuery:       '',
+  warningDrawerOpen: false,
+  graphs:            [],
+  activeGraph:       '',
+  // viewport transform
+  vp: { tx: 0, ty: 0, scale: 1 },
+  // cached layout (set by layout-engine, consumed by viewport-fit)
+  layoutBounds: { minX: 0, minY: 0, maxX: 800, maxY: 600 },
+  primaryBounds: { minX: 0, minY: 0, maxX: 800, maxY: 600 },
+  // layer-by-layer navigation
+  focusedId:  null,
+  focusStack: [],
+};
+
+function update(patch) {
+  Object.assign(state, patch);
+  render();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// view-filter  (FilteredGraph)
+// ═══════════════════════════════════════════════════════════════
+// Inputs:  GraphSnapshot, focusedId, statusFilter, searchQuery
+// Outputs: FilteredGraph  — nodes tagged with .ghost for greyed-out siblings
+function viewFilter(snapshot, focusedId, statusFilter, searchQuery) {
+  if (!snapshot?.components) return { nodes: [], edges: [], highlights: new Set() };
+
+  const q = searchQuery.toLowerCase();
+  const highlights = new Set();
+  const allComps = Object.values(snapshot.components);
+
+  let primaryIds, ghostIds;
+
+  if (!focusedId) {
+    // Overview: only top-level (no parent) nodes
+    primaryIds = new Set(allComps.filter(c => !c.parent_id).map(c => c.component_id));
+    ghostIds = new Set();
+  } else {
+    const focused = snapshot.components[focusedId];
+    if (!focused) return { nodes: [], edges: [], highlights: new Set() };
+
+    // Primary: focused node + its direct children
+    primaryIds = new Set([focusedId]);
+    for (const c of allComps) {
+      if (c.parent_id === focusedId) primaryIds.add(c.component_id);
+    }
+
+    // Ghost: siblings (same parent_id & z_level as focused, not focused itself)
+    ghostIds = new Set();
+    for (const c of allComps) {
+      if (primaryIds.has(c.component_id)) continue;
+      if (c.parent_id === focused.parent_id && c.z_level === focused.z_level) {
+        ghostIds.add(c.component_id);
+      }
+    }
+  }
+
+  const visibleIds = new Set([...primaryIds, ...ghostIds]);
+
+  // Apply status filter (always pass ghost nodes through so they render dimmed)
+  const nodes = allComps.filter(c => {
+    if (!visibleIds.has(c.component_id)) return false;
+    if (ghostIds.has(c.component_id)) return true; // always include ghosts
+    if (!statusFilter[c.status] && !c.external) return false;
+    return true;
+  });
+
+  const filteredIds = new Set(nodes.map(n => n.component_id));
+
+  if (q) {
+    for (const n of nodes) {
+      if (!ghostIds.has(n.component_id) &&
+          (n.component_id.toLowerCase().includes(q) ||
+           (n.description || '').toLowerCase().includes(q))) {
+        highlights.add(n.component_id);
+      }
+    }
+  }
+
+  const annotated = nodes.map(n => ({
+    ...n,
+    ghost: ghostIds.has(n.component_id),
+    highlighted: highlights.has(n.component_id),
+    dimmed: q.length > 0 && !highlights.has(n.component_id) && !ghostIds.has(n.component_id),
+  }));
+
+  const edges = (snapshot.edges || []).filter(e => {
+    if (!filteredIds.has(e.from_id) || !filteredIds.has(e.to_id)) return false;
+    if (e.edge_type === 'SCOPE') return false;
+    return true;
+  });
+
+  return { nodes: annotated, edges, highlights };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// layout-engine  (PositionedGraph)
+// ═══════════════════════════════════════════════════════════════
+// Inputs:  FilteredGraph
+// Outputs: PositionedGraph  (nodes augmented with {x, y, w, h})
+//
+// Strategy: topological rank (longest-path from sources) drives row
+// assignment, giving a natural flow layout with vertical space used
+// even when all nodes are at z=0.  In drill-down mode the focused
+// node keeps its overview position; its children fan out below it.
+function layoutEngine(filtered) {
+  const { nodes, edges } = filtered;
+  if (!nodes.length) return { nodes: [], edges };
+
+  const flowEdges = edges.filter(e => e.edge_type === 'FLOW');
+  const primaryNodes = nodes.filter(n => !n.ghost);
+  const ghostNodes   = nodes.filter(n =>  n.ghost);
+
+  // Longest-path topological rank: sources = 0, each node is at
+  // max(predecessor ranks) + 1.  Disconnected nodes fall to rank 0.
+  function computeRank(nodeList) {
+    const ids = new Set(nodeList.map(n => n.component_id));
+    const adj = new Map(), inCount = new Map();
+    for (const n of nodeList) { adj.set(n.component_id, []); inCount.set(n.component_id, 0); }
+    for (const e of flowEdges) {
+      if (ids.has(e.from_id) && ids.has(e.to_id)) {
+        adj.get(e.from_id).push(e.to_id);
+        inCount.set(e.to_id, inCount.get(e.to_id) + 1);
+      }
+    }
+    const rank = new Map();
+    const q = nodeList.filter(n => !inCount.get(n.component_id)).map(n => n.component_id);
+    for (const id of q) rank.set(id, 0);
+    const inC = new Map(inCount), seen = new Set();
+    while (q.length) {
+      const cur = q.shift();
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      for (const nxt of (adj.get(cur) || [])) {
+        const r = (rank.get(cur) || 0) + 1;
+        if (!rank.has(nxt) || rank.get(nxt) < r) rank.set(nxt, r);
+        if ((inC.set(nxt, inC.get(nxt) - 1), inC.get(nxt)) === 0) q.push(nxt);
+      }
+    }
+    for (const n of nodeList) if (!rank.has(n.component_id)) rank.set(n.component_id, 0);
+    return rank;
+  }
+
+  function placeByRank(nodeList, rankMap, startY) {
+    const byRank = new Map();
+    for (const n of nodeList) {
+      const r = rankMap.get(n.component_id) ?? 0;
+      if (!byRank.has(r)) byRank.set(r, []);
+      byRank.get(r).push(n);
+    }
+    const out = [];
+    [...byRank.keys()].sort((a, b) => a - b).forEach((rank, rowIdx) => {
+      byRank.get(rank).forEach((n, colIdx) => {
+        out.push({ ...n,
+          x: MARGIN + colIdx * (NODE_W + H_GAP),
+          y: startY + rowIdx * (NODE_H + V_GAP),
+          w: NODE_W, h: NODE_H,
+        });
+      });
+    });
+    return out;
+  }
+
+  const positioned = [];
+  const posById = new Map();
+
+  // ── Determine which nodes form the "overview layer" ──────────
+  // In drill-down: ghosts + focused node share the overview positions.
+  // In overview:   all primary nodes are the overview layer.
+  const focusedNode = state.focusedId
+    ? primaryNodes.find(n => n.component_id === state.focusedId)
+    : null;
+  const childNodes = focusedNode
+    ? primaryNodes.filter(n => n.component_id !== state.focusedId)
+    : [];
+  const overviewLayer = ghostNodes.length > 0
+    ? [...ghostNodes, ...(focusedNode ? [focusedNode] : primaryNodes)]
+    : primaryNodes;
+
+  // ── Place overview layer ──────────────────────────────────────
+  const ovRank = computeRank(overviewLayer);
+  const placed = placeByRank(overviewLayer, ovRank, MARGIN);
+  for (const n of placed) {
+    posById.set(n.component_id, { x: n.x, y: n.y });
+    positioned.push(n);
+  }
+
+  // ── Place child nodes below the focused node ──────────────────
+  if (focusedNode && childNodes.length) {
+    const fp = posById.get(focusedNode.component_id) ?? { x: MARGIN, y: MARGIN };
+    const childRank = computeRank(childNodes);
+
+    // How many rows of children will we insert?
+    const maxChildRank = childNodes.reduce((m, n) => Math.max(m, childRank.get(n.component_id) ?? 0), 0);
+    const childRowCount = maxChildRank + 1;
+    const childShift   = childRowCount * (NODE_H + V_GAP);
+
+    // Push every ghost that sits below the focused node down to make room
+    for (const n of positioned) {
+      if (n.ghost && n.y > fp.y) n.y += childShift;
+    }
+
+    const byRank = new Map();
+    for (const n of childNodes) {
+      const r = childRank.get(n.component_id) ?? 0;
+      if (!byRank.has(r)) byRank.set(r, []);
+      byRank.get(r).push(n);
+    }
+    [...byRank.keys()].sort((a, b) => a - b).forEach((rank, rowOffset) => {
+      const rankNodes = byRank.get(rank);
+      const totalW = rankNodes.length * NODE_W + (rankNodes.length - 1) * H_GAP;
+      const startX  = fp.x + NODE_W / 2 - totalW / 2;
+      const y       = fp.y + (NODE_H + V_GAP) * (rowOffset + 1);
+      rankNodes.forEach((n, colIdx) => {
+        positioned.push({ ...n,
+          x: startX + colIdx * (NODE_W + H_GAP),
+          y,
+          w: NODE_W, h: NODE_H,
+        });
+      });
+    });
+  }
+
+  // ── Bounds ───────────────────────────────────────────────────
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of positioned) {
+    minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.w); maxY = Math.max(maxY, n.y + n.h);
+  }
+  state.layoutBounds = { minX, minY, maxX, maxY };
+
+  const primaries = positioned.filter(n => !n.ghost);
+  const psrc = primaries.length ? primaries : positioned;
+  let pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
+  for (const n of psrc) {
+    pMinX = Math.min(pMinX, n.x); pMinY = Math.min(pMinY, n.y);
+    pMaxX = Math.max(pMaxX, n.x + n.w); pMaxY = Math.max(pMaxY, n.y + n.h);
+  }
+  state.primaryBounds = { minX: pMinX, minY: pMinY, maxX: pMaxX, maxY: pMaxY };
+
+  return { nodes: positioned, edges };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// svg-renderer  (SVGElement mutations)
+// ═══════════════════════════════════════════════════════════════
+// Inputs:  PositionedGraph, selectedId
+// Outputs: Mutates #viewport SVG group
+function svgRenderer(positioned, selectedId) {
+  const vp = document.getElementById('viewport');
+  // Clear
+  while (vp.firstChild) vp.removeChild(vp.firstChild);
+
+  const { nodes, edges } = positioned;
+  if (!nodes.length) return;
+
+  // Build id→position map
+  const posMap = new Map();
+  for (const n of nodes) posMap.set(n.component_id, n);
+
+  // ── Edges first (below nodes) ──
+  for (const e of edges) {
+    const from = posMap.get(e.from_id);
+    const to   = posMap.get(e.to_id);
+    if (!from || !to) continue;
+
+    const isFlow = e.edge_type === 'FLOW';
+    const isRef  = e.edge_type === 'REFERENCE';
+
+    // center-bottom of from → center-top of to
+    const x1 = from.x + from.w / 2;
+    const y1 = from.y + from.h;
+    const x2 = to.x + to.w / 2;
+    const y2 = to.y;
+
+    const cy1 = y1 + V_GAP * 0.5;
+    const cy2 = y2 - V_GAP * 0.5;
+    const d = `M${x1},${y1} C${x1},${cy1} ${x2},${cy2} ${x2},${y2}`;
+
+    const ghostEdge = posMap.get(e.from_id)?.ghost || posMap.get(e.to_id)?.ghost;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    if (ghostEdge) {
+      path.setAttribute('stroke', '#475569');
+      path.setAttribute('stroke-width', '1');
+      path.setAttribute('stroke-dasharray', '3,5');
+      path.setAttribute('opacity', '0.18');
+    } else {
+      path.setAttribute('stroke', isFlow ? '#38bdf8' : '#475569');
+      path.setAttribute('stroke-width', isFlow ? '1.5' : '1');
+      if (isRef) path.setAttribute('stroke-dasharray', '5,4');
+      if (isFlow) path.setAttribute('marker-end', 'url(#arrow-flow)');
+      else if (isRef) path.setAttribute('marker-end', 'url(#arrow)');
+      path.setAttribute('opacity', '0.7');
+    }
+    vp.appendChild(path);
+  }
+
+  // ── Nodes ──
+  for (const n of nodes) {
+    const isSelected = n.component_id === selectedId;
+    const isGhost = !!n.ghost;
+    const fill = isGhost ? '#2d3748' : (n.external ? EXTERNAL_COLOR : (STATUS_COLOR[n.status] || '#475569'));
+    const opacity = isGhost ? 0.22 : (n.dimmed ? 0.35 : 1);
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('data-id', n.component_id);
+    g.setAttribute('transform', `translate(${n.x},${n.y})`);
+    g.setAttribute('cursor', 'pointer');
+    g.setAttribute('opacity', opacity);
+
+    // Highlight ring
+    if (n.highlighted) {
+      const ring = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      ring.setAttribute('x', -4); ring.setAttribute('y', -4);
+      ring.setAttribute('width', n.w + 8); ring.setAttribute('height', n.h + 8);
+      ring.setAttribute('rx', 12);
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke', '#fbbf24');
+      ring.setAttribute('stroke-width', '2');
+      g.appendChild(ring);
+    }
+
+    // Rect
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('width', n.w); rect.setAttribute('height', n.h);
+    rect.setAttribute('rx', 8);
+    rect.setAttribute('fill', fill);
+    if (isSelected) {
+      rect.setAttribute('stroke', '#ffffff');
+      rect.setAttribute('stroke-width', '3');
+    } else {
+      rect.setAttribute('stroke', 'rgba(255,255,255,0.15)');
+      rect.setAttribute('stroke-width', '1');
+    }
+    g.appendChild(rect);
+
+    // Label: component_id
+    const maxChars = 22;
+    const label = n.component_id.length > maxChars
+      ? n.component_id.slice(0, maxChars - 1) + '…'
+      : n.component_id;
+
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', n.w / 2); text.setAttribute('y', n.h / 2 - 8);
+    text.setAttribute('text-anchor', 'middle');
+    text.setAttribute('font-family', 'ui-monospace, monospace');
+    text.setAttribute('font-size', '11');
+    text.setAttribute('font-weight', '700');
+    text.setAttribute('fill', '#fff');
+    text.textContent = label;
+    g.appendChild(text);
+
+    // Status sub-label
+    const sub = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    sub.setAttribute('x', n.w / 2); sub.setAttribute('y', n.h / 2 + 10);
+    sub.setAttribute('text-anchor', 'middle');
+    sub.setAttribute('font-family', 'system-ui, sans-serif');
+    sub.setAttribute('font-size', '9');
+    sub.setAttribute('fill', 'rgba(255,255,255,0.7)');
+    sub.textContent = (n.external ? 'external · ' : '') + (n.status || '');
+    g.appendChild(sub);
+
+    vp.appendChild(g);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// navigation  (FocusMode)
+// ═══════════════════════════════════════════════════════════════
+function navigateTo(id) {
+  if (!id) return;
+  const snap = state.snapshot;
+  if (!snap?.components?.[id]) return;
+
+  const target = snap.components[id];
+  let newStack;
+
+  if (!state.focusedId) {
+    newStack = [id];
+  } else if (target.parent_id === state.focusedId) {
+    // Clicking a child → drill deeper
+    newStack = [...state.focusStack, id];
+  } else {
+    const focused = snap.components[state.focusedId];
+    if (focused && target.parent_id === focused.parent_id && target.z_level === focused.z_level) {
+      // Sibling (ghost) → replace current level
+      newStack = [...state.focusStack.slice(0, -1), id];
+    } else {
+      // Unrelated jump → start fresh
+      newStack = [id];
+    }
+  }
+
+  update({ focusedId: id, focusStack: newStack, selectedId: id });
+  requestAnimationFrame(zoomToPrimary);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// viewport-controller  (TransformedSVG)
+// ═══════════════════════════════════════════════════════════════
+// Maintains vp transform; applyTransform() applies it to the DOM.
+function applyTransform() {
+  const { tx, ty, scale } = state.vp;
+  document.getElementById('viewport').setAttribute(
+    'transform', `translate(${tx},${ty}) scale(${scale})`
+  );
+}
+
+function zoomToFit() {
+  const wrap = document.getElementById('canvas-wrap');
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const { minX, minY, maxX, maxY } = state.layoutBounds;
+  if (maxX <= minX || maxY <= minY) return;
+  const PAD = 40;
+  const scaleX = (W - PAD * 2) / (maxX - minX);
+  const scaleY = (H - PAD * 2) / (maxY - minY);
+  const scale = Math.min(scaleX, scaleY, 4);
+  const tx = PAD + (W - PAD * 2 - (maxX - minX) * scale) / 2 - minX * scale;
+  const ty = PAD + (H - PAD * 2 - (maxY - minY) * scale) / 2 - minY * scale;
+  state.vp = { tx, ty, scale };
+  applyTransform();
+}
+
+function zoomToPrimary() {
+  const wrap = document.getElementById('canvas-wrap');
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const { minX, minY, maxX, maxY } = state.primaryBounds;
+  if (maxX <= minX || maxY <= minY) return;
+  const PAD = 70;
+  const scaleX = (W - PAD * 2) / (maxX - minX);
+  const scaleY = (H - PAD * 2) / (maxY - minY);
+  const scale = Math.min(scaleX, scaleY, 3);
+  const tx = PAD + (W - PAD * 2 - (maxX - minX) * scale) / 2 - minX * scale;
+  const ty = PAD + (H - PAD * 2 - (maxY - minY) * scale) / 2 - minY * scale;
+  state.vp = { tx, ty, scale };
+  applyTransform();
+}
+
+function scrollToNode(id) {
+  const snap = state.snapshot;
+  if (!snap) return;
+  // Re-run layout to find position
+  const filtered = viewFilter(snap, state.focusedId, state.statusFilter, state.searchQuery);
+  const pg = layoutEngine(filtered);
+  const node = pg.nodes.find(n => n.component_id === id);
+  if (!node) return;
+  const wrap = document.getElementById('canvas-wrap');
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  const { scale } = state.vp;
+  const tx = W / 2 - (node.x + node.w / 2) * scale;
+  const ty = H / 2 - (node.y + node.h / 2) * scale;
+  state.vp = { tx, ty, scale };
+  applyTransform();
+}
+
+// ── Gesture setup ──
+function setupViewport() {
+  const svg = document.getElementById('graph-svg');
+  let dragging = false, lastX = 0, lastY = 0;
+  let pinchDist0 = null, pinch0Scale = 1, pinch0Tx = 0, pinch0Ty = 0;
+
+  svg.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    const rect = svg.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const { tx, ty, scale } = state.vp;
+    const newScale = Math.min(4, Math.max(0.1, scale * factor));
+    const k = newScale / scale;
+    state.vp = {
+      scale: newScale,
+      tx: cx + (tx - cx) * k,
+      ty: cy + (ty - cy) * k,
+    };
+    applyTransform();
+  }, { passive: false });
+
+  // Pan via drag on background
+  svg.addEventListener('pointerdown', e => {
+    if (e.target.closest('[data-id]')) return; // node drag ignored
+    dragging = true;
+    lastX = e.clientX; lastY = e.clientY;
+    svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    state.vp.tx += dx;
+    state.vp.ty += dy;
+    applyTransform();
+  });
+  svg.addEventListener('pointerup', () => { dragging = false; });
+  svg.addEventListener('pointercancel', () => { dragging = false; });
+
+  // Touch pinch-zoom
+  svg.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchDist0 = Math.hypot(dx, dy);
+      pinch0Scale = state.vp.scale;
+      pinch0Tx = state.vp.tx;
+      pinch0Ty = state.vp.ty;
+    }
+  }, { passive: false });
+  svg.addEventListener('touchmove', e => {
+    if (e.touches.length === 2 && pinchDist0 !== null) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const newScale = Math.min(4, Math.max(0.1, pinch0Scale * (dist / pinchDist0)));
+      state.vp = { scale: newScale, tx: pinch0Tx, ty: pinch0Ty };
+      applyTransform();
+    }
+  }, { passive: false });
+  svg.addEventListener('touchend', () => { pinchDist0 = null; });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// interaction-handler  (NodeSelection)
+// ═══════════════════════════════════════════════════════════════
+// Inputs:  TransformedSVG (events on #graph-svg)
+// Outputs: NodeSelection → update(selectedId)
+function setupInteraction() {
+  const svg    = document.getElementById('graph-svg');
+  const tooltip = document.getElementById('tooltip');
+
+  svg.addEventListener('click', e => {
+    const g = e.target.closest('[data-id]');
+    const id = g ? g.getAttribute('data-id') : null;
+    if (!id) {
+      // Background click → go back one level
+      if (!state.focusStack.length) return;
+      if (state.focusStack.length === 1) {
+        update({ focusedId: null, focusStack: [], selectedId: null });
+        requestAnimationFrame(zoomToFit);
+      } else {
+        const newStack = state.focusStack.slice(0, -1);
+        const parentId = newStack[newStack.length - 1];
+        update({ focusedId: parentId, focusStack: newStack, selectedId: parentId });
+        requestAnimationFrame(zoomToPrimary);
+      }
+      return;
+    }
+    if (id === state.focusedId) {
+      update({ selectedId: id }); // already the focus: just inspect
+    } else {
+      navigateTo(id);
+    }
+  });
+
+  svg.addEventListener('pointermove', e => {
+    const g = e.target.closest('[data-id]');
+    if (!g) {
+      tooltip.className = '';
+      return;
+    }
+    const id = g.getAttribute('data-id');
+    const comp = state.snapshot?.components?.[id];
+    if (!comp) { tooltip.className = ''; return; }
+    tooltip.className = 'visible';
+    tooltip.innerHTML =
+      `<strong style="font-family:monospace">${comp.component_id}</strong><br>` +
+      `<span style="color:#94a3b8">${comp.status}${comp.external ? ' · external' : ''} · z${comp.z_level}</span>` +
+      (comp.description ? `<br>${comp.description.slice(0, 120)}${comp.description.length > 120 ? '…' : ''}` : '');
+    tooltip.style.left = (e.clientX + 14) + 'px';
+    tooltip.style.top  = (e.clientY + 14) + 'px';
+  });
+
+  svg.addEventListener('mouseleave', () => {
+    tooltip.className = '';
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// selection-resolver  (ComponentDetail)
+// ═══════════════════════════════════════════════════════════════
+// Inputs:  NodeSelection, GraphSnapshot, WarningList
+// Outputs: ComponentDetail
+function selectionResolver(selectedId, snapshot) {
+  if (!selectedId || !snapshot?.components) return null;
+  const comp = snapshot.components[selectedId];
+  if (!comp) return null;
+
+  const edges = snapshot.edges || [];
+  const neighbors_in  = edges
+    .filter(e => e.to_id   === selectedId && e.edge_type === 'FLOW')
+    .map(e => e.from_id);
+  const neighbors_out = edges
+    .filter(e => e.from_id === selectedId && e.edge_type === 'FLOW')
+    .map(e => e.to_id);
+
+  const warnings = (snapshot.warnings || [])
+    .filter(w => (w.affected || []).includes(selectedId));
+
+  return { ...comp, neighbors_in, neighbors_out, warnings };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// detail-view  (RenderedDetail → DOM)
+// ═══════════════════════════════════════════════════════════════
+// Inputs:  ComponentDetail
+// Outputs: Mutates #inspector-inner
+function detailView(detail) {
+  const panel = document.getElementById('inspector-inner');
+  if (!detail) {
+    panel.innerHTML = '<div class="empty-state">Click a node to inspect</div>';
+    return;
+  }
+
+  const statusBadge = `<span class="badge badge-${detail.status}">${detail.status}</span>`;
+  const extBadge    = detail.external ? `<span class="badge badge-external">external</span>` : '';
+  const lvlBadge    = `<span class="badge badge-level">z${detail.z_level}</span>`;
+
+  const typeChips = arr => (arr || [])
+    .map(t => `<span class="type-chip">${esc(t)}</span>`).join('');
+
+  const warnHtml = (detail.warnings || []).length
+    ? detail.warnings.map(w => `<span class="warn-chip">⚠ ${esc(w.warning_type)}</span>`).join(' ')
+    : '';
+
+  panel.innerHTML = `
+    <div class="insp-id">${esc(detail.component_id)}</div>
+    <div class="badge-row">${statusBadge}${extBadge}${lvlBadge}</div>
+
+    ${detail.description ? `
+    <div class="insp-section">
+      <div class="insp-label">Description</div>
+      <div class="insp-text">${esc(detail.description)}</div>
+    </div>` : ''}
+
+    ${detail.processing ? `
+    <div class="insp-section">
+      <div class="insp-label">Processing</div>
+      <div class="insp-text">${esc(detail.processing)}</div>
+    </div>` : ''}
+
+    ${(detail.input_types || []).length ? `
+    <div class="insp-section">
+      <div class="insp-label">Inputs</div>
+      <div class="type-chips">${typeChips(detail.input_types)}</div>
+    </div>` : ''}
+
+    ${(detail.output_types || []).length ? `
+    <div class="insp-section">
+      <div class="insp-label">Outputs</div>
+      <div class="type-chips">${typeChips(detail.output_types)}</div>
+    </div>` : ''}
+
+    ${warnHtml ? `<div class="insp-section"><div class="insp-label">Warnings</div>${warnHtml}</div>` : ''}
+
+    <div id="nbr-mount"></div>
+  `;
+
+  // neighbor-navigator is rendered right after
+}
+
+// ═══════════════════════════════════════════════════════════════
+// neighbor-navigator  (NodeSelection via chip click)
+// ═══════════════════════════════════════════════════════════════
+// Inputs:  ComponentDetail
+// Outputs: NodeSelection (via update + scrollToNode)
+function neighborNavigator(detail) {
+  const mount = document.getElementById('nbr-mount');
+  if (!mount || !detail) return;
+
+  const chips = ids => ids.map(id =>
+    `<span class="nbr-chip" data-nbr="${esc(id)}">${esc(id)}</span>`
+  ).join('');
+
+  let html = '';
+  if ((detail.neighbors_in || []).length) {
+    html += `<div class="nbr-section">
+      <div class="insp-label">Receives from</div>
+      <div class="nbr-chips">${chips(detail.neighbors_in)}</div>
+    </div>`;
+  }
+  if ((detail.neighbors_out || []).length) {
+    html += `<div class="nbr-section">
+      <div class="insp-label">Sends to</div>
+      <div class="nbr-chips">${chips(detail.neighbors_out)}</div>
+    </div>`;
+  }
+  mount.innerHTML = html;
+
+  mount.querySelectorAll('[data-nbr]').forEach(el => {
+    el.addEventListener('click', () => {
+      navigateTo(el.getAttribute('data-nbr'));
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// breadcrumb  (FocusMode → DOM)
+// ═══════════════════════════════════════════════════════════════
+function renderBreadcrumb() {
+  const el = document.getElementById('breadcrumb');
+  const stack = state.focusStack;
+
+  if (!stack.length) {
+    el.className = '';
+    el.innerHTML = '';
+    return;
+  }
+
+  el.className = 'visible';
+  const parts = [`<span class="crumb" data-nav="__overview__">overview</span>`];
+  stack.forEach((id, i) => {
+    const isLast = i === stack.length - 1;
+    const label = id.length > 30 ? id.slice(0, 29) + '…' : id;
+    parts.push(`<span class="crumb-sep"> › </span>`);
+    parts.push(
+      isLast
+        ? `<span class="crumb active">${esc(label)}</span>`
+        : `<span class="crumb" data-nav="${esc(id)}">${esc(label)}</span>`
+    );
+  });
+  el.innerHTML = parts.join('');
+
+  el.querySelectorAll('[data-nav]').forEach(crumb => {
+    crumb.addEventListener('click', () => {
+      const nav = crumb.getAttribute('data-nav');
+      if (nav === '__overview__') {
+        update({ focusedId: null, focusStack: [], selectedId: null });
+        requestAnimationFrame(zoomToFit);
+      } else {
+        const idx = state.focusStack.indexOf(nav);
+        if (idx >= 0) {
+          const newStack = state.focusStack.slice(0, idx + 1);
+          update({ focusedId: nav, focusStack: newStack, selectedId: nav });
+          requestAnimationFrame(zoomToPrimary);
+        }
+      }
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// warning-drawer  (WarningList + ViewCommand → NodeSelection)
+// ═══════════════════════════════════════════════════════════════
+// Inputs:  WarningList, ViewCommand (toggle)
+// Outputs: NodeSelection (chip click → update)
+function renderWarningDrawer() {
+  const drawer  = document.getElementById('warning-drawer');
+  const body    = document.getElementById('drawer-body');
+  const badge   = document.getElementById('warn-badge');
+
+  const warnings = state.snapshot?.warnings || [];
+
+  // Badge
+  if (warnings.length > 0) {
+    badge.className = 'visible';
+    badge.textContent = `⚠ ${warnings.length}`;
+  } else {
+    badge.className = 'visible zero';
+    badge.textContent = '⚠ 0';
+  }
+
+  // Drawer open/close
+  drawer.className = state.warningDrawerOpen ? 'open' : '';
+
+  // Drawer body: group by warning_type
+  const groups = new Map();
+  for (const w of warnings) {
+    if (!groups.has(w.warning_type)) groups.set(w.warning_type, []);
+    groups.get(w.warning_type).push(w);
+  }
+
+  let html = '';
+  for (const [type, wlist] of groups) {
+    const allAffected = [...new Set(wlist.flatMap(w => w.affected || []))];
+    html += `<div class="wg-type">${esc(type)}</div>
+      <div class="wg-affected">${allAffected.map(id =>
+        `<span class="wg-chip" data-wid="${esc(id)}">${esc(id)}</span>`
+      ).join('')}</div>`;
+  }
+  if (!warnings.length) html = '<span style="color:#64748b;font-size:11px">No active warnings</span>';
+  body.innerHTML = html;
+
+  body.querySelectorAll('[data-wid]').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = el.getAttribute('data-wid');
+      update({ selectedId: id, warningDrawerOpen: false });
+      scrollToNode(id);
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// toolbar  (SwitchGraph, ViewCommand)
+// ═══════════════════════════════════════════════════════════════
+function renderToolbar() {
+  const snap = state.snapshot;
+  const maxZ = snap?.stats?.max_z_level ?? 5;
+  const slider = document.getElementById('depth-slider');
+  slider.max = maxZ;
+  const depthVal = document.getElementById('depth-val');
+  depthVal.textContent = state.viewDepth >= maxZ ? 'all' : `z≤${state.viewDepth}`;
+
+  // Status filter visual sync
+  document.querySelectorAll('.sf-check').forEach(el => {
+    const status = el.dataset.status;
+    el.classList.toggle('off', !state.statusFilter[status]);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Main render() — orchestrates the full pipeline
+// ═══════════════════════════════════════════════════════════════
+function render() {
+  renderToolbar();
+  renderWarningDrawer();
+
+  const snap = state.snapshot;
+  if (!snap?.components) {
+    document.getElementById('viewport').innerHTML = '';
+    const panel = document.getElementById('inspector-inner');
+    panel.innerHTML = '<div class="empty-state" style="margin-top:30px;color:#64748b">Waiting for graph data…</div>';
+    return;
+  }
+
+  // Pipeline: view-filter → layout-engine → svg-renderer
+  const filtered   = viewFilter(snap, state.focusedId, state.statusFilter, state.searchQuery);
+  const positioned = layoutEngine(filtered);
+  svgRenderer(positioned, state.selectedId);
+  applyTransform();
+  renderBreadcrumb();
+
+  // Inspector: selection-resolver → detail-view → neighbor-navigator
+  const detail = selectionResolver(state.selectedId, snap);
+  detailView(detail);
+  neighborNavigator(detail);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Toolbar event wiring
+// ═══════════════════════════════════════════════════════════════
+function setupToolbar() {
+  // Graph selector
+  const sel = document.getElementById('graph-select');
+  sel.addEventListener('change', async () => {
+    const name = sel.value;
+    await fetch(`/api/switch?name=${encodeURIComponent(name)}`);
+    state.activeGraph = name;
+    // Snapshot will arrive via SSE
+  });
+
+  // Search — debounced 150ms
+  let searchTimer = null;
+  document.getElementById('search').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => update({ searchQuery: e.target.value }), 150);
+  });
+
+  // Depth slider
+  const slider = document.getElementById('depth-slider');
+  slider.addEventListener('input', () => {
+    const max = parseInt(slider.max, 10);
+    const val = parseInt(slider.value, 10);
+    update({ viewDepth: val >= max ? 999 : val });
+  });
+
+  // Status filter checkboxes
+  document.querySelectorAll('.sf-check').forEach(label => {
+    label.addEventListener('click', () => {
+      const status = label.dataset.status;
+      const next = { ...state.statusFilter, [status]: !state.statusFilter[status] };
+      update({ statusFilter: next });
+    });
+  });
+
+  // Fit button
+  document.getElementById('fit-btn').addEventListener('click', zoomToFit);
+
+  // Warning badge
+  document.getElementById('warn-badge').addEventListener('click', () => {
+    update({ warningDrawerOpen: !state.warningDrawerOpen });
+  });
+
+  // Warning drawer close
+  document.getElementById('drawer-close').addEventListener('click', () => {
+    update({ warningDrawerOpen: false });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Graph list loader
+// ═══════════════════════════════════════════════════════════════
+async function loadGraphList() {
+  try {
+    const res = await fetch('/api/graphs');
+    const data = await res.json();
+    const sel = document.getElementById('graph-select');
+    sel.innerHTML = (data.graphs || [])
+      .map(g => `<option value="${esc(g)}"${g === data.active ? ' selected' : ''}>${esc(g)}</option>`)
+      .join('');
+    state.activeGraph = data.active || '';
+    // Sync slider max after we get a snapshot
+  } catch (e) {
+    console.warn('Could not load graph list:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SSE listener (armature-bridge)
+// ═══════════════════════════════════════════════════════════════
+function setupSSE() {
+  let es;
+  function connect() {
+    es = new EventSource('/api/events');
+    es.onmessage = e => {
+      try {
+        const snap = JSON.parse(e.data);
+        if (snap && typeof snap === 'object' && snap.components) {
+          // Reset depth slider max
+          const maxZ = snap.stats?.max_z_level ?? 5;
+          const slider = document.getElementById('depth-slider');
+          const prevMax = parseInt(slider.max, 10);
+          slider.max = maxZ;
+          if (state.viewDepth === 999 || state.viewDepth > maxZ) {
+            // keep "all"
+          }
+          update({ snapshot: snap });
+        }
+      } catch { /* ignore malformed */ }
+    };
+    es.onerror = () => {
+      es.close();
+      setTimeout(connect, 3000);
+    };
+  }
+  connect();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Utility
+// ═══════════════════════════════════════════════════════════════
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Bootstrap
+// ═══════════════════════════════════════════════════════════════
+async function init() {
+  setupToolbar();
+  setupViewport();
+  setupInteraction();
+
+  await loadGraphList();
+
+  // Initial snapshot load
+  try {
+    const res = await fetch('/api/graph');
+    const snap = await res.json();
+    if (snap && snap.components) {
+      update({ snapshot: snap });
+      // Auto-fit on first load
+      requestAnimationFrame(() => zoomToFit());
+    }
+  } catch (e) {
+    console.warn('Initial graph load failed:', e);
+  }
+
+  setupSSE();
+  render();
+}
+
+init();
+</script>
+</body>
+</html>

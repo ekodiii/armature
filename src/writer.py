@@ -1,7 +1,7 @@
 from typing import Optional
 
 from models import Component, Edge, Graph
-from store import add_component, add_edge, get_component, get_edge, remove_component
+from store import add_component, add_edge, get_component, get_edge, remove_component, remove_edge
 from validator import validate_component, validate_edge
 
 
@@ -110,4 +110,27 @@ def propose_edge(graph: Graph, edge: Edge) -> list[str]:
     if error is not None:
         return [error]
     add_edge(graph, edge)
+    return []
+
+
+def delete_edge(graph: Graph, edge: Edge) -> list[str]:
+    """Remove a single FLOW or REFERENCE edge from the graph.
+
+    SCOPE edges are derived from parent_id and managed by component parenting --
+    deleting one directly would desync the hierarchy (the parent's children list
+    and the component's parent_id would still reference each other while the
+    SCOPE edge is gone). To rewire the parent relationship, delete and re-propose
+    the child component instead.
+    """
+    from models import EdgeType  # local to avoid circular at module top
+    if edge.edge_type == EdgeType.SCOPE:
+        return [
+            f"Cannot delete SCOPE edge '{edge.edge_id}'. SCOPE edges are derived "
+            "from parent_id and managed by component parenting. To rewire the "
+            "parent relationship, delete the child component and re-propose it "
+            "with the new parent_id."
+        ]
+    if edge.edge_id not in graph.edges:
+        return [f"Edge '{edge.edge_id}' does not exist"]
+    remove_edge(graph, graph.edges[edge.edge_id])
     return []
