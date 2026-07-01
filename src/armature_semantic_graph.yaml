@@ -33,7 +33,7 @@ components:
     parent_id: null
     version: 4
     implemented_version: 4
-    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: server.py
       start_line: 1
@@ -57,7 +57,7 @@ components:
     parent_id: null
     version: 2
     implemented_version: 2
-    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: models.py
       start_line: 1
@@ -164,7 +164,7 @@ components:
     parent_id: mcp-dispatch
     version: 3
     implemented_version: 3
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: server.py
       start_line: 402
@@ -186,7 +186,7 @@ components:
     parent_id: mcp-dispatch
     version: 3
     implemented_version: 3
-    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: server.py
       start_line: 809
@@ -205,13 +205,13 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 1
-    implemented_version: 1
-    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    version: 2
+    implemented_version: 2
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: server.py
-      start_line: 1118
-      end_line: 1209
+      start_line: 1487
+      end_line: 1579
   dispatch-helpers:
     component_id: dispatch-helpers
     description: 'Internal server utilities: registry/workspace helpers (_load/_save_registry,
@@ -304,7 +304,7 @@ components:
     parent_id: graph-core
     version: 4
     implemented_version: 4
-    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: writer.py
       start_line: 1
@@ -619,13 +619,16 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 1
-    implemented_version: 1
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    version: 2
+    implemented_version: 2
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: server.py
-      start_line: 423
-      end_line: 494
+      start_line: 442
+      end_line: 454
+    - path: server.py
+      start_line: 504
+      end_line: 522
   query-topology:
     component_id: query-topology
     description: "get_neighbors, get_references, get_subgraph, get_path, get_impact\
@@ -643,7 +646,7 @@ components:
     parent_id: dispatch-query
     version: 1
     implemented_version: 1
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: server.py
       start_line: 439
@@ -688,13 +691,16 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 1
-    implemented_version: 1
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    version: 2
+    implemented_version: 2
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: server.py
-      start_line: 548
-      end_line: 678
+      start_line: 583
+      end_line: 608
+    - path: server.py
+      start_line: 681
+      end_line: 722
   trans-ingestion:
     component_id: trans-ingestion
     description: "Source ingestion (translator/source_ingestion.py) \u2014 si_dir_walker,\
@@ -945,13 +951,13 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 2
-    implemented_version: 2
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    version: 3
+    implemented_version: 3
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: server.py
-      start_line: 576
-      end_line: 606
+      start_line: 611
+      end_line: 650
   query-locate:
     component_id: query-locate
     description: "Intent-to-location router: given a keyword/question, returns the\
@@ -1020,6 +1026,7 @@ components:
     version: 3
     implemented_version: 3
     implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    code_drifted: true
     locations:
     - path: translator/verify.py
       start_line: 1
@@ -1113,7 +1120,7 @@ components:
     parent_id: trans-verify
     version: 3
     implemented_version: 3
-    implemented_sha: deeae5ddcbf6d83c51e4e76c67a09bd975e59bfa
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: translator/verify.py
       start_line: 409
@@ -1167,7 +1174,7 @@ components:
     parent_id: translator-pipeline
     version: 3
     implemented_version: 3
-    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: translator/lift.py
       start_line: 1
@@ -1398,7 +1405,7 @@ components:
     parent_id: mcp-dispatch
     version: 2
     implemented_version: 2
-    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: server.py
       start_line: 996
@@ -1425,7 +1432,7 @@ components:
     parent_id: null
     version: 3
     implemented_version: 3
-    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: tests/test_graph_core.py
       start_line: null
@@ -1482,7 +1489,7 @@ components:
     parent_id: null
     version: 1
     implemented_version: 1
-    implemented_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: gitsync.py
       start_line: 1
@@ -1698,6 +1705,7 @@ components:
     version: 0
     implemented_version: 0
     implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    code_drifted: true
     locations:
     - path: translator/verify.py
       start_line: 549
@@ -1721,6 +1729,7 @@ components:
     version: 0
     implemented_version: 0
     implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    code_drifted: true
     locations:
     - path: translator/verify.py
       start_line: 595
@@ -1744,14 +1753,14 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 1
-    implemented_version: 1
-    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    version: 2
+    implemented_version: 2
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     feature: batch-crud
     locations:
     - path: server.py
-      start_line: 1188
-      end_line: 1266
+      start_line: 1280
+      end_line: 1374
   batch-op-validator:
     component_id: batch-op-validator
     description: 'Pre-flight validator for a batch op list: deserializes each op dict,
@@ -1770,14 +1779,14 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-batch
-    version: 1
-    implemented_version: 1
-    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    version: 2
+    implemented_version: 2
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     feature: batch-crud
     locations:
     - path: server.py
-      start_line: 1228
-      end_line: 1251
+      start_line: 1320
+      end_line: 1344
   batch-dry-run:
     component_id: batch-dry-run
     description: 'Dry-run executor: replays the ordered MutationRequest list against
@@ -1802,17 +1811,14 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-batch
-    version: 2
-    implemented_version: 2
-    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    version: 3
+    implemented_version: 3
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     feature: batch-crud
     locations:
     - path: server.py
-      start_line: 1101
-      end_line: 1186
-    - path: server.py
-      start_line: 1253
-      end_line: 1260
+      start_line: 1345
+      end_line: 1353
   batch-commit:
     component_id: batch-commit
     description: 'Commit phase: replays the validated MutationRequest list against
@@ -1831,14 +1837,14 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-batch
-    version: 1
-    implemented_version: 1
-    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    version: 2
+    implemented_version: 2
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     feature: batch-crud
     locations:
     - path: server.py
-      start_line: 1262
-      end_line: 1266
+      start_line: 1354
+      end_line: 1374
   dispatch-query-terse:
     component_id: dispatch-query-terse
     description: 'Terse-mode additions to the five query tools that currently return
@@ -1860,7 +1866,7 @@ components:
     parent_id: mcp-dispatch
     version: 1
     implemented_version: 1
-    implemented_sha: 791c5183fa4596842f7ffa7b09ab704edb7364d2
+    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     feature: query-terse
     locations:
     - path: server.py
@@ -2474,4 +2480,4 @@ warnings:
     \ by any single entry/exit child node. Justified gap."
 - id: flow_cycle__filesystem_graph-core_translator-pipeline
   ignore_reason: Pre-existing intentional job-queue/architecture loop.
-last_synced_sha: d2b2c3a75b5dfc3513a821495a45564d91b7a5e7
+last_synced_sha: 542f989e720974ea025e33f9c922aca49910afad
