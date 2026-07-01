@@ -1557,10 +1557,12 @@ components:
       end_line: 239
   verification-router:
     component_id: verification-router
-    description: Contract verification beyond structural fidelity (PLANNED, beta+).
-      Turns a leaf component's contract into an executable obligation and routes it
-      to the strongest ACHIEVABLE checker. MVP checker = LLM-generated property-based
-      tests (the run is the check); formal/SMT proof is explicitly deferred.
+    description: "Contract verification beyond structural fidelity (PLANNED, beta+).\
+      \ Turns a leaf component's contract into an executable obligation and routes\
+      \ it to the strongest ACHIEVABLE checker. MVP checker = operator-authored property-based\
+      \ tests run against the real code (the run is the check the operator cannot\
+      \ fake); formal/SMT proof is explicitly deferred. Operator-driven end to end\
+      \ \u2014 the server assembles and runs; no embedded LLM API."
     processing: 'Per leaf: extract obligation from contract -> classify (testable
       / formally-checkable / unverifiable IO boundary) -> discharge -> feed result
       into the fidelity report.'
@@ -1571,17 +1573,26 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 1
-    implemented_version: null
-    implemented_sha: null
+    version: 3
+    implemented_version: 3
+    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
     feature: verification-router
-    locations: []
+    locations:
+    - path: verifier/verify.py
+      start_line: null
+      end_line: null
   vr-obligation-extractor:
     component_id: vr-obligation-extractor
-    description: Turns a leaf component's typed contract (receives/must_produce +
-      processing) into one or more checkable property statements.
-    processing: LLM autoformalizes the contract into properties/invariants over the
-      leaf's inputs and outputs.
+    description: 'Packages a leaf''s typed contract + the operator-authored property
+      statements into a structured Obligation: recovers the callable signature (params
+      + type hints) and import target from the leaf''s code anchor (locations -> module
+      + symbol) and carries them forward so the checker can import and exercise the
+      REAL callable. Operator-driven, like lift-intent-describer: the operator authors
+      the properties against the surfaced contract/code; the extractor is mechanical
+      packaging (no embedded LLM).'
+    processing: Recover the callable signature from the leaf's code anchor; attach
+      the operator-authored property expressions, any custom-type strategy overrides,
+      and import_roots; emit the Obligation.
     input_types:
     - LeafContract
     output_types:
@@ -1589,17 +1600,24 @@ components:
     z_level: 1
     external: false
     parent_id: verification-router
-    version: 1
-    implemented_version: null
-    implemented_sha: null
+    version: 4
+    implemented_version: 4
+    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
     feature: verification-router
-    locations: []
+    locations:
+    - path: verifier/extractor.py
+      start_line: null
+      end_line: null
   vr-checker-router:
     component_id: vr-checker-router
-    description: 'Classifies each obligation by the strongest checker it admits: property-testable
-      (most), formally-checkable (pure/bounded), or unverifiable (external/IO boundary).'
-    processing: Route on contract shape + leaf purity/anchors; unverifiable leaves
-      are flagged, not failed.
+    description: "Classifies each Obligation by the strongest ACHIEVABLE checker:\
+      \ property_testable (the MVP default for anchored leaves with concrete input\
+      \ types), formally_checkable (pure/bounded leaves \u2014 routed to the deferred\
+      \ vr-formal-checker), or unverifiable (external/IO boundary \u2014 flagged,\
+      \ not failed). For the MVP the formal branch is dormant; everything achievable\
+      \ routes to vr-pbt-generator."
+    processing: Route on contract shape + leaf purity/anchors + input-type concreteness;
+      attach checker_kind to the Obligation to form the RoutedObligation.
     input_types:
     - Obligation
     output_types:
@@ -1607,17 +1625,25 @@ components:
     z_level: 1
     external: false
     parent_id: verification-router
-    version: 1
-    implemented_version: null
-    implemented_sha: null
+    version: 3
+    implemented_version: 3
+    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
     feature: verification-router
-    locations: []
+    locations:
+    - path: verifier/router.py
+      start_line: null
+      end_line: null
   vr-pbt-generator:
     component_id: vr-pbt-generator
-    description: 'MVP checker: generates and runs property-based tests (Hypothesis)
-      for a routed obligation; the test run is the check the LLM cannot fake.'
-    processing: Emit Hypothesis strategies + property asserts against the contract;
-      execute; report pass/counterexample.
+    description: "MVP checker (decomposed): turns a RoutedObligation into a BEHAVIORAL\
+      \ proof by synthesizing a Hypothesis property test, running it against the real\
+      \ leaf code, and interpreting the outcome. The un-fakeable subprocess run \u2014\
+      \ not the LLM's say-so \u2014 is the check. Formal/SMT proof stays deferred\
+      \ to vr-formal-checker."
+    processing: synthesize test (vr-strategy-synthesizer) -> execute in an isolated
+      subprocess (vr-test-runner) -> interpret verdict + counterexample (vr-result-interpreter).
+      The properties are operator-authored (and thus fakeable); the un-fakeable run
+      is the ground truth that gates the verdict.
     input_types:
     - RoutedObligation
     output_types:
@@ -1625,11 +1651,14 @@ components:
     z_level: 1
     external: false
     parent_id: verification-router
-    version: 1
-    implemented_version: null
-    implemented_sha: null
+    version: 4
+    implemented_version: 4
+    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
     feature: verification-router
-    locations: []
+    locations:
+    - path: verifier/pbt.py
+      start_line: null
+      end_line: null
   vr-formal-checker:
     component_id: vr-formal-checker
     description: 'DEFERRED (post-beta): discharges obligations on pure, bounded leaves
@@ -1849,6 +1878,113 @@ components:
     - path: server.py
       start_line: 560
       end_line: 578
+  vr-strategy-synthesizer:
+    component_id: vr-strategy-synthesizer
+    description: "Assembles a runnable pytest + Hypothesis module from a RoutedObligation:\
+      \ binds each fuzzed parameter to a Hypothesis strategy (a type->strategy registry,\
+      \ recursing through common containers; the operator supplies strategy expressions\
+      \ for custom types), embeds the operator-authored property assertions, and imports\
+      \ the REAL leaf callable from the obligation's code anchor. Mechanical assembly\
+      \ \u2014 no embedded LLM. 'Fakeable' only in that the operator authored the\
+      \ properties; the output is trusted once vr-test-runner executes it against\
+      \ real code."
+    processing: Parse each parameter's type hint into a Hypothesis strategy via the
+      registry; fall back to the operator-supplied strategy for unknown types (else
+      raise a clear error); emit one @given test per property calling the imported
+      leaf; return a self-contained TestProgram (source + import_roots).
+    input_types:
+    - RoutedObligation
+    output_types:
+    - TestProgram
+    z_level: 2
+    external: false
+    parent_id: vr-pbt-generator
+    version: 2
+    implemented_version: 2
+    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    feature: verification-router
+    locations:
+    - path: verifier/synthesizer.py
+      start_line: null
+      end_line: null
+  vr-test-runner:
+    component_id: vr-test-runner
+    description: 'Executes the synthesized TestProgram in an isolated subprocess (pytest
+      + Hypothesis), capturing pass/fail, the Hypothesis falsifying example, stdout/stderr
+      and return code. This is the un-fakeable step: the actual run against real code
+      is the ground truth the LLM cannot talk its way past.'
+    processing: Write the TestProgram to a temp module; run pytest in a subprocess
+      under a timeout (isolating imports/side-effects); collect a structured RawTestOutcome
+      (status, falsifying_example, captured output, returncode).
+    input_types:
+    - TestProgram
+    output_types:
+    - RawTestOutcome
+    z_level: 2
+    external: false
+    parent_id: vr-pbt-generator
+    version: 1
+    implemented_version: 1
+    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    feature: verification-router
+    locations:
+    - path: verifier/runner.py
+      start_line: null
+      end_line: null
+  vr-result-interpreter:
+    component_id: vr-result-interpreter
+    description: "Maps a RawTestOutcome onto an ObligationResult verdict: verified\
+      \ (all generated cases held), refuted (+ the minimal falsifying counterexample),\
+      \ or error (the test timed out or never produced a real verdict). Attaches the\
+      \ captured run output as evidence for the operator and the fidelity report.\
+      \ The generated test source is bundled by the parent vr-pbt-generator, which\
+      \ holds the TestProgram \u2014 the interpreter only sees the outcome."
+    processing: Classify the pytest/Hypothesis outcome -> status; extract the falsifying
+      example on refute; package evidence into the ObligationResult.
+    input_types:
+    - RawTestOutcome
+    output_types:
+    - ObligationResult
+    z_level: 2
+    external: false
+    parent_id: vr-pbt-generator
+    version: 2
+    implemented_version: 2
+    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    feature: verification-router
+    locations:
+    - path: verifier/interpreter.py
+      start_line: null
+      end_line: null
+  vr-dispatch-verify:
+    component_id: vr-dispatch-verify
+    description: "MVP tool surface: verify_contract(component_id, properties[, strategies])\
+      \ \u2014 the operator authors property statements against the leaf's contract/code\
+      \ (seen via get_work_context / get_component_code); the tool packages them into\
+      \ an Obligation, routes, assembles a Hypothesis test, runs it against the REAL\
+      \ code, and returns the ObligationResult (verified / refuted+counterexample\
+      \ / unverifiable / error). Operator is the author, the run is the check \u2014\
+      \ no embedded LLM. Turns 'verifiable goals' from a structural claim into a behavioral\
+      \ one the operator can invoke."
+    processing: Resolve component_id -> LeafContract (+ recovered signature) via graph-core;
+      build the Obligation from the operator-authored properties; drive route -> synthesize
+      -> run -> interpret; serialize the ObligationResult as the McpToolResponse.
+      Refuses non-leaf / unanchored components.
+    input_types:
+    - McpToolCall
+    output_types:
+    - McpToolResponse
+    z_level: 1
+    external: false
+    parent_id: mcp-dispatch
+    version: 2
+    implemented_version: 2
+    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    feature: verification-router
+    locations:
+    - path: server.py
+      start_line: 1106
+      end_line: 1179
 edges:
 - edge_type: FLOW
   from_id: llm-operator
@@ -2132,6 +2268,18 @@ edges:
 - edge_type: REFERENCE
   from_id: dispatch-query-terse
   to_id: query-component-lookup
+- edge_type: FLOW
+  from_id: vr-strategy-synthesizer
+  to_id: vr-test-runner
+- edge_type: FLOW
+  from_id: vr-test-runner
+  to_id: vr-result-interpreter
+- edge_type: REFERENCE
+  from_id: vr-test-runner
+  to_id: test-suite
+- edge_type: REFERENCE
+  from_id: vr-dispatch-verify
+  to_id: verification-router
 warnings:
 - id: hanging_output__mcp-dispatch
   ignore_reason: McpToolResponse is the terminal output returned to the LLM operator
@@ -2301,10 +2449,6 @@ warnings:
   ignore_reason: CodeSkeleton enters trans-verify from trans-skeleton cross-boundary
     (the skeleton is threaded through trans-lifter's context to the verify stage);
     justified entry input at this pipeline decomposition boundary.
-- id: coverage_gap__mcp-dispatch
-  ignore_reason: "McpToolResponse exits mcp-dispatch back to the LLM operator external\
-    \ boundary \u2014 the output is covered by llm-operator at z=0; the gap is a cross-level\
-    \ coverage artifact since the exit node is an external sibling."
 - id: coverage_gap__graph-core
   ignore_reason: "MutationRequest/QueryRequest enter from mcp-dispatch cross-boundary\
     \ (not a child entry node); Warning/QueryResult exit to mcp-dispatch cross-boundary.\

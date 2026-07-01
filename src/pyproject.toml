@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "hypothesis>=6.155.7",
     "leidenalg>=0.12.0",
     "mcp>=1.27.2",
     "pyyaml>=6.0.3",

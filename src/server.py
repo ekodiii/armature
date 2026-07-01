@@ -87,6 +87,7 @@ from writer import (
 )
 from translator import lift as _lift
 from translator import verify as _verifylib
+from verifier import LeafContract as _LeafContract, Property as _Property, verify_leaf as _verify_leaf
 # --- workspace configuration -----------------------------------------------
 # Central library, location-independent so it works on CLI, desktop, and web.
 ARMATURE_HOME = os.environ.get("ARMATURE_HOME", os.path.expanduser("~/.armature"))
@@ -1099,6 +1100,81 @@ def reconcile(since: Optional[str] = None, include_uncommitted: bool = False) ->
         "no_baseline": report.no_baseline,
         "checked": report.checked,
         "clean": report.is_clean,
+    }
+
+
+@mcp.tool()
+def verify_contract(
+    component_id: str,
+    properties: list[dict],
+    strategies: Optional[dict] = None,
+    symbol: Optional[str] = None,
+    timeout_s: float = 30.0,
+) -> dict:
+    """Behaviorally verify a leaf against operator-authored properties (beyond
+    structural fidelity). YOU author the property statements after reading the
+    leaf's contract/code (get_work_context / get_component_code); this tool
+    recovers the callable's signature from the code anchor, assembles a
+    Hypothesis property test, RUNS it against the real code in an isolated
+    subprocess, and returns the verdict. The run is the check — a false property
+    comes back 'refuted' with a counterexample; you cannot talk past it.
+
+    - properties: [{"name", "expression", "kind"?}] — each `expression` is a
+      Python bool over the leaf's parameter names, `result` (the return value),
+      and the leaf symbol itself (for metamorphic relations).
+    - strategies: optional {type-name-or-param-name: hypothesis-strategy-expr}
+      for parameters the type registry can't map (e.g. un-annotated or custom
+      types), such as {"x": "st.integers()"}.
+    - symbol: disambiguate which callable when the file has several.
+
+    Returns {ok, component_id, status, detail, counterexample, evidence} where
+    status is verified / refuted / error / unverifiable, or {"error": ...}."""
+    if GRAPH is None:
+        return _no_active()
+    c, err = _fetch(component_id)
+    if err:
+        return err
+    if c.children:
+        return {"error": f"Component '{component_id}' is not a leaf; verify targets leaf components."}
+
+    props = []
+    for i, p in enumerate(properties or []):
+        if not isinstance(p, dict) or not p.get("expression"):
+            return {"error": f"properties[{i}] must be a dict with a non-empty 'expression'."}
+        props.append(_Property(
+            name=p.get("name") or f"prop_{i}",
+            expression=p["expression"],
+            kind=p.get("kind", "postcondition"),
+        ))
+    if not props:
+        return {"error": "verify_contract needs at least one property {name, expression}."}
+
+    leaf = _LeafContract(
+        component_id=c.component_id,
+        input_types=list(c.input_types),
+        output_types=list(c.output_types),
+        processing=c.processing,
+        locations=[
+            {"path": loc.path, "start_line": loc.start_line, "end_line": loc.end_line}
+            for loc in c.locations
+        ],
+        external=c.external,
+    )
+    result = _verify_leaf(
+        leaf, props,
+        project_root=_project_root(),
+        external=c.external,
+        strategies=strategies,
+        symbol=symbol,
+        timeout_s=timeout_s,
+    )
+    return {
+        "ok": True,
+        "component_id": component_id,
+        "status": result.status,
+        "detail": result.detail,
+        "counterexample": result.counterexample,
+        "evidence": result.evidence,
     }
 
 
