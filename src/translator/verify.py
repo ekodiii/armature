@@ -60,11 +60,14 @@ class ContractFinding:
 class GroundingFinding:
     """A FLOW or REFERENCE edge with no backing in the skeleton.
 
-    kind distinguishes the two cases so scoring never has to parse `detail`:
-      "unverifiable" — neither endpoint is anchored, so the edge cannot be
-                       checked (excluded from the grounding denominator).
-      "ungrounded"   — both endpoints anchored but no skeleton link connects
-                       them (a real finding against the score).
+    kind distinguishes cases so scoring never has to parse `detail`:
+      "unverifiable"     — neither endpoint is anchored, so the edge cannot be
+                           checked (excluded from the grounding denominator).
+      "ungrounded"       — both endpoints anchored but no skeleton link in either
+                           direction (full score penalty, weight 1.0).
+      "direction_suspect" — grounded only via reversed call/dataflow link; the
+                           relationship exists but the edge may point the wrong
+                           way (low-weight hint, weight 0.1 in score).
     """
     edge_id: str
     from_id: str
@@ -470,24 +473,57 @@ def flow_grounding_checker(state: VerificationState) -> VerificationState:
             # Partial — don't flag, but note it could be improved
             continue
 
-        bidirectional = (edge.edge_type == EdgeType.REFERENCE)
-        grounded = (
-            has_backing(from_syms, to_syms, bidirectional=bidirectional)
-            or has_import_link(from_syms, to_syms)
-        )
-
-        if not grounded:
-            state.grounding_findings.append(GroundingFinding(
-                edge_id=edge_id,
-                from_id=edge.from_id,
-                to_id=edge.to_id,
-                edge_type=edge.edge_type.value,
-                detail=(
-                    f"no call, dataflow, or import link found between "
-                    f"{len(from_syms)} from-symbols and {len(to_syms)} to-symbols"
-                ),
-                kind="ungrounded",
-            ))
+        if edge.edge_type == EdgeType.REFERENCE:
+            # REFERENCE is undirected — accept either orientation.
+            grounded = (
+                has_backing(from_syms, to_syms, bidirectional=True)
+                or has_import_link(from_syms, to_syms)
+            )
+            if not grounded:
+                state.grounding_findings.append(GroundingFinding(
+                    edge_id=edge_id,
+                    from_id=edge.from_id,
+                    to_id=edge.to_id,
+                    edge_type=edge.edge_type.value,
+                    detail=(
+                        f"no call, dataflow, or import link found between "
+                        f"{len(from_syms)} from-symbols and {len(to_syms)} to-symbols"
+                    ),
+                    kind="ungrounded",
+                ))
+        else:
+            # FLOW: orientation-agnostic. Call direction is the inverse of dataflow
+            # direction (A calls B ↔ B returns value to A), so we accept either
+            # direction as evidence. If only the reverse passes, emit direction_suspect.
+            forward = (
+                has_backing(from_syms, to_syms)
+                or has_import_link(from_syms, to_syms)
+            )
+            if not forward:
+                if has_backing(to_syms, from_syms):
+                    state.grounding_findings.append(GroundingFinding(
+                        edge_id=edge_id,
+                        from_id=edge.from_id,
+                        to_id=edge.to_id,
+                        edge_type=edge.edge_type.value,
+                        detail=(
+                            f"grounded only via reversed call/dataflow — "
+                            f"edge direction may be inverted"
+                        ),
+                        kind="direction_suspect",
+                    ))
+                else:
+                    state.grounding_findings.append(GroundingFinding(
+                        edge_id=edge_id,
+                        from_id=edge.from_id,
+                        to_id=edge.to_id,
+                        edge_type=edge.edge_type.value,
+                        detail=(
+                            f"no call, dataflow, or import link found between "
+                            f"{len(from_syms)} from-symbols and {len(to_syms)} to-symbols"
+                        ),
+                        kind="ungrounded",
+                    ))
 
     return state
 
@@ -540,15 +576,16 @@ def discrepancy_reconciler(state: VerificationState) -> VerifiedModel:
         e for e in graph.edges.values()
         if e.edge_type in (EdgeType.FLOW, EdgeType.REFERENCE)
     ]
-    # Only count verifiable edges (both endpoints anchored and non-external) in
-    # the denominator, and only count ungrounded findings (not the unverifiable
-    # ones we already excluded) in the numerator — otherwise the two disagree and
-    # the score is understated, even negative.
+    # unverifiable edges are excluded from the denominator entirely.
+    # ungrounded counts at weight 1.0; direction_suspect at 0.1 (the relationship
+    # exists but the edge may point the wrong way — a hint, not a miss).
     unverifiable = sum(1 for f in state.grounding_findings if f.kind == "unverifiable")
     ungrounded = sum(1 for f in state.grounding_findings if f.kind == "ungrounded")
+    direction_suspect = sum(1 for f in state.grounding_findings if f.kind == "direction_suspect")
     verifiable = len(ref_flow_edges) - unverifiable
     if verifiable > 0:
-        grounding_score = max(0.0, 1.0 - ungrounded / verifiable)
+        effective_ungrounded = ungrounded + 0.1 * direction_suspect
+        grounding_score = max(0.0, 1.0 - effective_ungrounded / verifiable)
     else:
         grounding_score = 1.0
 
@@ -574,6 +611,7 @@ def discrepancy_reconciler(state: VerificationState) -> VerifiedModel:
         "coverage_findings": len(state.coverage_findings),
         "contract_findings": len(state.contract_findings),
         "grounding_findings": len(state.grounding_findings),
+        "direction_suspect_findings": direction_suspect,
     }
 
     return VerifiedModel(

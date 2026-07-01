@@ -1088,13 +1088,22 @@ components:
       end_line: 402
   verify-flow-grounding:
     component_id: verify-flow-grounding
-    description: Checks that every FLOW/REFERENCE edge in the SemanticModel has a
-      backing call/dataflow/import link in the CodeSkeleton. Findings carry a kind
-      ('unverifiable' when neither endpoint is anchored, 'ungrounded' when both are
-      anchored but unlinked) so scoring need not parse the detail string.
-    processing: For each FLOW edge in the SemanticModel, looks up the pair of anchored
-      symbol ids in the CodeSkeleton call graph and dataflow graph; records ungrounded
-      edges into VerificationState.
+    description: "Checks that every FLOW/REFERENCE edge in the SemanticModel has a\
+      \ backing call/dataflow/import link in the CodeSkeleton. FLOW grounding is orientation-agnostic\
+      \ \u2014 dataflow direction is the inverse of call direction, so both forward\
+      \ and reverse call/dataflow pairs are accepted as evidence. Three finding kinds:\
+      \ 'unverifiable' (neither endpoint anchored \u2014 excluded from the grounding\
+      \ denominator), 'ungrounded' (both endpoints anchored, no link in either direction\
+      \ \u2014 full score penalty), 'direction_suspect' (grounded only via reversed\
+      \ call/dataflow \u2014 low-weight hint that the edge may point the wrong way).\
+      \ REFERENCE edges remain bidirectional (unchanged)."
+    processing: "For each FLOW edge where both endpoints are anchored and non-external:\
+      \ (1) check forward \u2014 has_backing(from_syms, to_syms) or has_import_link\
+      \ \u2192 grounded, no finding; (2) if not, check reverse \u2014 has_backing(to_syms,\
+      \ from_syms) \u2192 grounded, emit direction_suspect; (3) if neither, emit ungrounded.\
+      \ For REFERENCE edges: bidirectional check unchanged (already accepts either\
+      \ direction). Emits unverifiable when neither endpoint has skeleton anchors.\
+      \ One-sided-anchor edges are skipped (partial, not flagged)."
     input_types:
     - VerificationState
     output_types:
@@ -1102,9 +1111,9 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 2
-    implemented_version: 2
-    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    version: 3
+    implemented_version: 3
+    implemented_sha: deeae5ddcbf6d83c51e4e76c67a09bd975e59bfa
     locations:
     - path: translator/verify.py
       start_line: 409
@@ -1116,8 +1125,9 @@ components:
       precision (0.15), contract (0.15), grounding (0.20), externals (0.10). precision_score
       = 1 - coarse-leaf prevalence over non-external leaves; externals_score = 0 when
       third-party boundaries exist but the graph models no external node. Grounding
-      still counts only ungrounded findings against the verifiable-edge denominator,
-      clamped to [0,1].'
+      score: ungrounded findings count at weight 1.0 and direction_suspect findings
+      at weight 0.1 against the verifiable-edge denominator (unverifiable edges excluded),
+      result clamped to [0,1].'
     processing: Computes precision_score and externals_score, blends six weighted
       sub-scores into trust_score, and emits a VerifiedModel carrying anchor/coverage/contract/grounding/precision/external
       findings plus the sub-score breakdown.
@@ -1128,9 +1138,9 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 2
-    implemented_version: 2
-    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    version: 3
+    implemented_version: 3
+    implemented_sha: deeae5ddcbf6d83c51e4e76c67a09bd975e59bfa
     locations:
     - path: translator/verify.py
       start_line: 643
