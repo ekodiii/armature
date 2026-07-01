@@ -1575,7 +1575,7 @@ components:
     parent_id: null
     version: 3
     implemented_version: 3
-    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    implemented_sha: 46c0dee32a42dd08de7fdc106c7793e0069afb41
     feature: verification-router
     locations:
     - path: verifier/verify.py
@@ -1602,7 +1602,7 @@ components:
     parent_id: verification-router
     version: 4
     implemented_version: 4
-    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    implemented_sha: 46c0dee32a42dd08de7fdc106c7793e0069afb41
     feature: verification-router
     locations:
     - path: verifier/extractor.py
@@ -1627,7 +1627,7 @@ components:
     parent_id: verification-router
     version: 3
     implemented_version: 3
-    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    implemented_sha: 46c0dee32a42dd08de7fdc106c7793e0069afb41
     feature: verification-router
     locations:
     - path: verifier/router.py
@@ -1653,7 +1653,7 @@ components:
     parent_id: verification-router
     version: 4
     implemented_version: 4
-    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    implemented_sha: 46c0dee32a42dd08de7fdc106c7793e0069afb41
     feature: verification-router
     locations:
     - path: verifier/pbt.py
@@ -1901,7 +1901,7 @@ components:
     parent_id: vr-pbt-generator
     version: 2
     implemented_version: 2
-    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    implemented_sha: 46c0dee32a42dd08de7fdc106c7793e0069afb41
     feature: verification-router
     locations:
     - path: verifier/synthesizer.py
@@ -1925,7 +1925,7 @@ components:
     parent_id: vr-pbt-generator
     version: 1
     implemented_version: 1
-    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    implemented_sha: 46c0dee32a42dd08de7fdc106c7793e0069afb41
     feature: verification-router
     locations:
     - path: verifier/runner.py
@@ -1950,7 +1950,7 @@ components:
     parent_id: vr-pbt-generator
     version: 2
     implemented_version: 2
-    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    implemented_sha: 46c0dee32a42dd08de7fdc106c7793e0069afb41
     feature: verification-router
     locations:
     - path: verifier/interpreter.py
@@ -1979,7 +1979,7 @@ components:
     parent_id: mcp-dispatch
     version: 2
     implemented_version: 2
-    implemented_sha: c6a3c856aceffac2d60cede89e2967ae7a740544
+    implemented_sha: 46c0dee32a42dd08de7fdc106c7793e0069afb41
     feature: verification-router
     locations:
     - path: server.py
