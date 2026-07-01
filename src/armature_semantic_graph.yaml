@@ -1024,9 +1024,8 @@ components:
     external: false
     parent_id: translator-pipeline
     version: 4
-    implemented_version: 3
-    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
-    code_drifted: true
+    implemented_version: 4
+    implemented_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
     locations:
     - path: translator/verify.py
       start_line: 1
@@ -1046,8 +1045,8 @@ components:
     external: false
     parent_id: trans-verify
     version: 3
-    implemented_version: 2
-    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    implemented_version: 3
+    implemented_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
     locations:
     - path: translator/verify.py
       start_line: 175
@@ -1066,8 +1065,8 @@ components:
     external: false
     parent_id: trans-verify
     version: 3
-    implemented_version: 2
-    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    implemented_version: 3
+    implemented_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
     locations:
     - path: translator/verify.py
       start_line: 249
@@ -1087,8 +1086,8 @@ components:
     external: false
     parent_id: trans-verify
     version: 3
-    implemented_version: 2
-    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
+    implemented_version: 3
+    implemented_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
     locations:
     - path: translator/verify.py
       start_line: 406
@@ -1119,8 +1118,8 @@ components:
     external: false
     parent_id: trans-verify
     version: 4
-    implemented_version: 3
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    implemented_version: 4
+    implemented_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
     locations:
     - path: translator/verify.py
       start_line: 466
@@ -1146,8 +1145,8 @@ components:
     external: false
     parent_id: trans-verify
     version: 4
-    implemented_version: 3
-    implemented_sha: deeae5ddcbf6d83c51e4e76c67a09bd975e59bfa
+    implemented_version: 4
+    implemented_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
     locations:
     - path: translator/verify.py
       start_line: 678
@@ -1413,11 +1412,12 @@ components:
   test-suite:
     component_id: test-suite
     description: "Pytest regression suite (tests/) exercising the graph engine and\
-      \ translator. 88 tests across test_graph_core, test_serializer, test_warnings,\
-      \ test_translator_skeleton, test_translator_verify, test_gitsync, test_features\
-      \ \u2014 each bug fixed or check added has a named regression test, including\
-      \ the verifier precision/externals hardening, the translate-scope fix, and the\
-      \ delete_edge tool. Run via `uv run pytest`."
+      \ translator. 120 tests across test_graph_core, test_serializer, test_warnings,\
+      \ test_translator_skeleton, test_translator_verify, test_gitsync, test_features,\
+      \ test_verifier_* \u2014 each bug fixed or check added has a named regression\
+      \ test, including the verifier precision/externals hardening (restored from\
+      \ an abandoned branch), the translate-scope fix, the delete_edge tool, and the\
+      \ verification-router property-test engine. Run via `uv run pytest`."
     processing: 'Imports the flat modules (pythonpath=src), builds synthetic graphs
       and source trees, and asserts behavior: id/structural validation, cycle detection,
       save/load round-trip + dangling-ref errors, each warning type + per-cycle id,
@@ -1430,9 +1430,9 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 3
-    implemented_version: 3
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 4
+    implemented_version: 4
+    implemented_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
     locations:
     - path: tests/test_graph_core.py
       start_line: null
@@ -1703,9 +1703,8 @@ components:
     external: false
     parent_id: trans-verify
     version: 1
-    implemented_version: 0
-    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
-    code_drifted: true
+    implemented_version: 1
+    implemented_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
     locations:
     - path: translator/verify.py
       start_line: 351
@@ -1727,9 +1726,8 @@ components:
     external: false
     parent_id: trans-verify
     version: 1
-    implemented_version: 0
-    implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
-    code_drifted: true
+    implemented_version: 1
+    implemented_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
     locations:
     - path: translator/verify.py
       start_line: 630
@@ -2480,4 +2478,4 @@ warnings:
     \ by any single entry/exit child node. Justified gap."
 - id: flow_cycle__filesystem_graph-core_translator-pipeline
   ignore_reason: Pre-existing intentional job-queue/architecture loop.
-last_synced_sha: 542f989e720974ea025e33f9c922aca49910afad
+last_synced_sha: 5f5845be4fe5a08eb37462979c600c67f11a4784
