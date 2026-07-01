@@ -115,6 +115,79 @@ def test_external_component_skips_anchor_checks(tmp_path):
     assert all(f.subject != "db" for f in vm.coverage_findings)
 
 
+# --------------------------------------------------------------------------- #
+# direction_suspect — orientation-agnostic FLOW grounding
+# --------------------------------------------------------------------------- #
+
+def test_direction_suspect_score_weight(tmp_path):
+    # direction_suspect counts at 0.1, not 1.0.
+    # 4 FLOW edges: 1 ungrounded + 1 direction_suspect + 2 verifiable clean.
+    # effective_ungrounded = 1 + 0.1*1 = 1.1; verifiable = 4
+    # grounding_score = 1 - 1.1/4 = 0.725
+    g = Graph.new()
+    for i in range(8):
+        add_component(g, Component(f"c{i}", "d", "p", ["t"], ["t"], 0))
+    for i in range(0, 8, 2):
+        add_edge(g, Edge(EdgeType.FLOW, f"c{i}", f"c{i+1}"))
+    skel = build_skeleton(ingest(make_tree(tmp_path, {"x.py": "def f():\n    return 1\n"})),
+                          str(tmp_path))
+    st = VerificationState(graph=g, skeleton=skel)
+    st.grounding_findings = [
+        GroundingFinding("e1", "c0", "c1", "FLOW", "x", kind="ungrounded"),
+        GroundingFinding("e2", "c2", "c3", "FLOW", "x", kind="direction_suspect"),
+    ]
+    vm = discrepancy_reconciler(st)
+    expected = round(1.0 - 1.1 / 4, 3)
+    assert vm.trust_breakdown["grounding_score"] == expected, vm.trust_breakdown
+    assert vm.trust_breakdown["direction_suspect_findings"] == 1
+
+
+def test_direction_suspect_emitted_for_reverse_call(tmp_path):
+    # Same-file scenario: graph says comp_a→comp_b (FLOW), but only fn_b calls fn_a
+    # (reverse). No cross-file import link, so only the reverse call backs this edge.
+    # Should emit direction_suspect, NOT ungrounded.
+    root = make_tree(tmp_path, {
+        "a.py": (
+            "def fn_a():\n    return 1\n\n"
+            "def fn_b():\n    return fn_a()\n"
+        ),
+    })
+    skel = build_skeleton(ingest(root), root)
+    g = Graph.new()
+    # comp_a covers fn_a (lines 1-2), comp_b covers fn_b (lines 4-5)
+    add_component(g, Component("comp_a", "d", "p", ["X"], ["V"], 0,
+                               locations=[FileLocation("a.py", start_line=1, end_line=2)]))
+    add_component(g, Component("comp_b", "d", "p", ["V"], ["W"], 0,
+                               locations=[FileLocation("a.py", start_line=4, end_line=5)]))
+    add_edge(g, Edge(EdgeType.FLOW, "comp_a", "comp_b"))
+    vm = verify(g, skel)
+    kinds = {f.kind for f in vm.grounding_findings}
+    assert "ungrounded" not in kinds, vm.grounding_findings
+    assert "direction_suspect" in kinds, vm.grounding_findings
+
+
+def test_forward_call_no_grounding_finding(tmp_path):
+    # comp_a (fn_a) calls comp_b (fn_b) — matches FLOW direction exactly.
+    # No grounding finding.
+    root = make_tree(tmp_path, {
+        "a.py": (
+            "def fn_b():\n    return 2\n\n"
+            "def fn_a():\n    return fn_b()\n"
+        ),
+    })
+    skel = build_skeleton(ingest(root), root)
+    g = Graph.new()
+    add_component(g, Component("comp_a", "d", "p", ["X"], ["V"], 0,
+                               locations=[FileLocation("a.py", start_line=4, end_line=5)]))
+    add_component(g, Component("comp_b", "d", "p", ["V"], ["W"], 0,
+                               locations=[FileLocation("a.py", start_line=1, end_line=2)]))
+    add_edge(g, Edge(EdgeType.FLOW, "comp_a", "comp_b"))
+    vm = verify(g, skel)
+    grounding_kinds = {f.kind for f in vm.grounding_findings}
+    assert "ungrounded" not in grounding_kinds, vm.grounding_findings
+    assert "direction_suspect" not in grounding_kinds, vm.grounding_findings
+
+
 def test_clean_graph_high_trust(tmp_path):
     # A graph that covers every leaf symbol with a real anchor scores well.
     root = make_tree(tmp_path, {"a.py": "def only():\n    return 1\n"})
