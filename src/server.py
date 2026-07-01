@@ -1452,12 +1452,13 @@ def translate_stitch() -> dict:
 @mcp.tool()
 def translate_verify() -> dict:
     """Audit the authored graph against the cached skeleton: a trust report with
-    anchor / coverage / contract / grounding findings and an overall trust score.
-    Requires a cached skeleton (translate_prepare).
+    anchor / coverage / precision / contract / grounding / externals findings and
+    an overall trust score. Requires a cached skeleton (translate_prepare).
 
     Returns {trust_score, trust_breakdown, anchor_findings, coverage_findings,
-    contract_findings, grounding_findings}. The graph and skeleton themselves are
-    omitted from the response (the operator already holds the graph)."""
+    precision_findings, contract_findings, grounding_findings, external_findings}.
+    The graph and skeleton themselves are omitted from the response (the operator
+    already holds the graph)."""
     if GRAPH is None:
         return _no_active()
     if _TRANSLATE_SKELETON is None:
@@ -1468,8 +1469,10 @@ def translate_verify() -> dict:
         "trust_breakdown": vm.trust_breakdown,
         "anchor_findings": [dataclasses.asdict(f) for f in vm.anchor_findings],
         "coverage_findings": [dataclasses.asdict(f) for f in vm.coverage_findings],
+        "precision_findings": [dataclasses.asdict(f) for f in vm.precision_findings],
         "contract_findings": [dataclasses.asdict(f) for f in vm.contract_findings],
         "grounding_findings": [dataclasses.asdict(f) for f in vm.grounding_findings],
+        "external_findings": [dataclasses.asdict(f) for f in vm.external_findings],
     }
 
 

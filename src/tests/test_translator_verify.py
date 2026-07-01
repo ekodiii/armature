@@ -197,3 +197,57 @@ def test_clean_graph_high_trust(tmp_path):
     vm = verify(g, skel)
     assert vm.trust_breakdown["coverage_score"] == 1.0
     assert vm.trust_breakdown["anchor_score"] == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Hardening: precision (coarse inclusion-only blobs) + externals (boundaries)
+# --------------------------------------------------------------------------- #
+
+def test_coarse_leaf_flagged(tmp_path):
+    # A leaf anchored to many whole files is an inclusion-only blob.
+    files = {f"m{i}.py": "def f():\n    return 1\n" for i in range(6)}
+    root = make_tree(tmp_path, files)
+    skel = build_skeleton(ingest(root), root)
+    g = Graph.new()
+    add_component(g, Component(
+        "blob", "d", "p", ["t"], ["t"], 0,
+        locations=[FileLocation(f"m{i}.py") for i in range(6)],
+    ))
+    vm = verify(g, skel)
+    assert any(f.component_id == "blob" for f in vm.precision_findings)
+    assert vm.trust_breakdown["precision_score"] < 1.0
+
+
+def test_focused_leaf_not_flagged(tmp_path):
+    # A focused leaf (one file, few symbols) must NOT be flagged coarse —
+    # this is the hand-authored pattern; hardening must not punish it.
+    root = make_tree(tmp_path, {"a.py": "def f():\n    return 1\n"})
+    skel = build_skeleton(ingest(root), root)
+    g = Graph.new()
+    add_component(g, anchored("c", "a.py"))
+    vm = verify(g, skel)
+    assert vm.precision_findings == []
+    assert vm.trust_breakdown["precision_score"] == 1.0
+
+
+def test_missing_external_flagged(tmp_path):
+    # Third-party import + ZERO external nodes -> missing-boundary finding.
+    root = make_tree(tmp_path, {"a.py": "import zzz_thirdparty\n\ndef f():\n    return 1\n"})
+    skel = build_skeleton(ingest(root), root)
+    g = Graph.new()
+    add_component(g, anchored("c", "a.py"))
+    vm = verify(g, skel)
+    assert any(f.module == "zzz_thirdparty" for f in vm.external_findings)
+    assert vm.trust_breakdown["externals_score"] == 0.0
+
+
+def test_external_node_suppresses_external_finding(tmp_path):
+    # If the graph DOES model a boundary node, don't fire (conservative check).
+    root = make_tree(tmp_path, {"a.py": "import zzz_thirdparty\n\ndef f():\n    return 1\n"})
+    skel = build_skeleton(ingest(root), root)
+    g = Graph.new()
+    add_component(g, anchored("c", "a.py"))
+    add_component(g, Component("boundary", "d", "p", ["t"], ["t"], 0, external=True))
+    vm = verify(g, skel)
+    assert vm.external_findings == []
+    assert vm.trust_breakdown["externals_score"] == 1.0

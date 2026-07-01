@@ -1023,14 +1023,14 @@ components:
     z_level: 1
     external: false
     parent_id: translator-pipeline
-    version: 3
+    version: 4
     implemented_version: 3
     implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     code_drifted: true
     locations:
     - path: translator/verify.py
       start_line: 1
-      end_line: 780
+      end_line: 822
   verify-location-anchor:
     component_id: verify-location-anchor
     description: Checks that every SemanticModel node has at least one valid CodeSkeleton
@@ -1045,13 +1045,13 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 2
+    version: 3
     implemented_version: 2
     implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: translator/verify.py
-      start_line: 173
-      end_line: 240
+      start_line: 175
+      end_line: 245
   verify-coverage:
     component_id: verify-coverage
     description: Checks that every symbol in the CodeSkeleton is covered by at least
@@ -1065,13 +1065,13 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 2
+    version: 3
     implemented_version: 2
     implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: translator/verify.py
-      start_line: 247
-      end_line: 342
+      start_line: 249
+      end_line: 347
   verify-contract:
     component_id: verify-contract
     description: Checks that input/output type contracts declared on SemanticModel
@@ -1086,13 +1086,13 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 2
+    version: 3
     implemented_version: 2
     implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     locations:
     - path: translator/verify.py
-      start_line: 349
-      end_line: 402
+      start_line: 406
+      end_line: 462
   verify-flow-grounding:
     component_id: verify-flow-grounding
     description: "Checks that every FLOW/REFERENCE edge in the SemanticModel has a\
@@ -1118,13 +1118,13 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 3
+    version: 4
     implemented_version: 3
     implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     locations:
     - path: translator/verify.py
-      start_line: 409
-      end_line: 533
+      start_line: 466
+      end_line: 626
   verify-reconciler:
     component_id: verify-reconciler
     description: 'Aggregates all VerificationState findings into a VerifiedModel with
@@ -1145,13 +1145,13 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 3
+    version: 4
     implemented_version: 3
     implemented_sha: deeae5ddcbf6d83c51e4e76c67a09bd975e59bfa
     locations:
     - path: translator/verify.py
-      start_line: 643
-      end_line: 757
+      start_line: 678
+      end_line: 799
   trans-lifter:
     component_id: trans-lifter
     description: "Operator-driven semantic lift stage \u2014 elevates a CodeSkeleton\
@@ -1702,14 +1702,14 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 0
+    version: 1
     implemented_version: 0
     implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     code_drifted: true
     locations:
     - path: translator/verify.py
-      start_line: 549
-      end_line: 588
+      start_line: 351
+      end_line: 402
   verify-externals:
     component_id: verify-externals
     description: "Flags real external boundaries (third-party dependencies) that are\
@@ -1726,14 +1726,14 @@ components:
     z_level: 2
     external: false
     parent_id: trans-verify
-    version: 0
+    version: 1
     implemented_version: 0
     implemented_sha: 28f5a69f51ceb369a2360b1c29469512d9783182
     code_drifted: true
     locations:
     - path: translator/verify.py
-      start_line: 595
-      end_line: 636
+      start_line: 630
+      end_line: 674
   dispatch-batch:
     component_id: dispatch-batch
     description: "Batch mutation tool surface \u2014 a single `batch_mutate(ops)`\
