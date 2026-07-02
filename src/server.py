@@ -290,6 +290,50 @@ def _terse(c: Component, fields: Optional[list[str]] = None) -> dict:
     return out
 
 
+# Format legend returned once per terse response instead of repeating JSON keys
+# on every node. Status is omitted for 'implemented' (the common case).
+LINE_LEGEND = (
+    "id [input_types -> output_types] <children>ch <edges>e (STATUS unless "
+    "implemented) :: description | locations as '@ path:start-end; ...'"
+)
+
+# Locations shown per line before collapsing to '+N more'.
+_LINE_MAX_LOCS = 5
+
+
+def _line(c: Component, locations: bool = False, indent: int = 0) -> str:
+    """One-line text view of a component -- the terse default for every
+    list-returning read tool. A formatted line carries the same information as
+    the _terse dict at a fraction of the tokens; LINE_LEGEND documents the
+    format once per response."""
+    desc = c.description.split("\n")[0]
+    ins = ",".join(c.input_types) or "-"
+    outs = ",".join(c.output_types) or "-"
+    parts = [
+        "  " * indent + c.component_id,
+        f"[{ins} -> {outs}]",
+        f"{len(c.children)}ch",
+        f"{len(c.edges_in) + len(c.edges_out)}e",
+    ]
+    st = _status(c)
+    if st != "implemented":
+        parts.append(f"({st.upper()})")
+    if c.feature:
+        parts.append(f"{{feature:{c.feature}}}")
+    parts.append(f":: {desc}")
+    if locations and c.locations:
+        shown = [
+            loc.path
+            + (f":{loc.start_line}-{loc.end_line}" if loc.start_line else "")
+            for loc in c.locations[:_LINE_MAX_LOCS]
+        ]
+        extra = len(c.locations) - _LINE_MAX_LOCS
+        if extra > 0:
+            shown.append(f"+{extra} more")
+        parts.append("@ " + "; ".join(shown))
+    return " ".join(parts)
+
+
 # One-line meaning + ignore guidance per warning type. Returned once per type that
 # is present, instead of repeating the full prose message on every warning.
 WARNING_LEGEND = {
@@ -462,8 +506,8 @@ def get_neighbors(component_id: str, edge_type: str, upstream: bool = False, ter
                "REFERENCE" (weak cross-boundary links).
     upstream:  False (default) follows outgoing edges -- downstream consumers /
                children. True follows incoming edges -- upstream producers / parent.
-    terse:     True (default) returns compact views (id, description, types, counts).
-               Pass False for full component dicts.
+    terse:     True (default) returns one compact text line per component (see
+               `legend` in the response). Pass False for full component dicts.
 
     Returns {"neighbors": [component, ...]} or {"error": ...}."""
     if GRAPH is None:
@@ -474,8 +518,11 @@ def get_neighbors(component_id: str, edge_type: str, upstream: bool = False, ter
     _, err = _fetch(component_id)
     if err:
         return err
-    fmt = _terse if terse else _comp_dict
-    return {"neighbors": [fmt(c) for c in _neighbors(GRAPH, component_id, et, upstream)]}
+    fmt = _line if terse else _comp_dict
+    out: dict = {"neighbors": [fmt(c) for c in _neighbors(GRAPH, component_id, et, upstream)]}
+    if terse:
+        out["legend"] = LINE_LEGEND
+    return out
 
 
 @mcp.tool()
@@ -488,7 +535,8 @@ def get_references(component_id: str, incoming: bool = False, terse: bool = True
 
     incoming=False returns components this one references; incoming=True returns
     components that reference this one.
-    terse=True (default) returns compact views; pass False for full dicts.
+    terse=True (default) returns one compact text line per component; pass False
+    for full dicts.
 
     Returns {"references": [...]} or {"error"}."""
     if GRAPH is None:
@@ -496,19 +544,24 @@ def get_references(component_id: str, incoming: bool = False, terse: bool = True
     _, err = _fetch(component_id)
     if err:
         return err
-    fmt = _terse if terse else _comp_dict
-    return {"references": [fmt(c) for c in _references(GRAPH, component_id, incoming)]}
+    fmt = _line if terse else _comp_dict
+    out: dict = {"references": [fmt(c) for c in _references(GRAPH, component_id, incoming)]}
+    if terse:
+        out["legend"] = LINE_LEGEND
+    return out
 
 
 @mcp.tool()
-def search_components(query: str, terse: bool = True) -> dict:
+def search_components(query: str, terse: bool = True, limit: int = 20) -> dict:
     """Find components whose id, description, or processing text contains the query
     (case-insensitive substring match -- semantic/embedding search is not yet
     wired). Useful when you know roughly what a component does but not its id.
 
-    terse=True (default) returns compact views; pass False for full dicts.
+    terse=True (default) returns one compact text line per match; pass False for
+    full dicts. At most `limit` matches are returned (default 20); the response
+    reports the total when truncated -- narrow the query rather than raising it.
 
-    Returns {"matches": [component, ...]}."""
+    Returns {"matches": [component, ...], "total"}."""
     if GRAPH is None:
         return _no_active()
     q = query.lower()
@@ -519,8 +572,14 @@ def search_components(query: str, terse: bool = True) -> dict:
         or q in c.description.lower()
         or q in c.processing.lower()
     ]
-    fmt = _terse if terse else _comp_dict
-    return {"matches": [fmt(c) for c in matches]}
+    total = len(matches)
+    fmt = _line if terse else _comp_dict
+    out: dict = {"matches": [fmt(c) for c in matches[:limit]], "total": total}
+    if total > limit:
+        out["note"] = f"showing {limit} of {total} matches; narrow the query"
+    if terse:
+        out["legend"] = LINE_LEGEND
+    return out
 
 
 @mcp.tool()
@@ -530,7 +589,8 @@ def get_subgraph(component_id: str, depth: int = -1, terse: bool = True) -> dict
     means just the direct children). This is how you zoom IN on one part of the
     system without loading siblings or ancestors.
 
-    terse=True (default) returns compact views; pass False for full dicts.
+    terse=True (default) returns one compact text line per component; pass False
+    for full dicts.
 
     Returns {"components": [...]} in pre-order, or {"error": ...}."""
     if GRAPH is None:
@@ -538,8 +598,11 @@ def get_subgraph(component_id: str, depth: int = -1, terse: bool = True) -> dict
     _, err = _fetch(component_id)
     if err:
         return err
-    fmt = _terse if terse else _comp_dict
-    return {"components": [fmt(c) for c in _subgraph(GRAPH, component_id, depth)]}
+    fmt = _line if terse else _comp_dict
+    out: dict = {"components": [fmt(c) for c in _subgraph(GRAPH, component_id, depth)]}
+    if terse:
+        out["legend"] = LINE_LEGEND
+    return out
 
 
 @mcp.tool()
@@ -563,7 +626,8 @@ def get_impact(component_id: str, terse: bool = True) -> dict:
     Use this before editing to understand blast radius: who feeds this component
     (upstream) and who depends on its output (downstream).
 
-    terse=True (default) returns compact views; pass False for full dicts.
+    terse=True (default) returns one compact text line per component; pass False
+    for full dicts.
 
     Returns {"upstream": [...], "downstream": [...]} or {"error": ...}."""
     if GRAPH is None:
@@ -572,11 +636,14 @@ def get_impact(component_id: str, terse: bool = True) -> dict:
     if err:
         return err
     result = _impact(GRAPH, component_id)
-    fmt = _terse if terse else _comp_dict
-    return {
+    fmt = _line if terse else _comp_dict
+    out: dict = {
         "upstream": [fmt(c) for c in result["upstream"]],
         "downstream": [fmt(c) for c in result["downstream"]],
     }
+    if terse:
+        out["legend"] = LINE_LEGEND
+    return out
 
 
 @mcp.tool()
@@ -608,19 +675,23 @@ def get_active_warnings() -> dict:
 
 
 @mcp.tool()
-def get_orient(feature: Optional[str] = None) -> dict:
-    """Compact whole-graph orientation map: one cheap call that returns the entire
-    SCOPE tree as a terse indented list so an operator grasps the whole layout
-    without crawling get_subgraph node by node.
+def get_orient(feature: Optional[str] = None, depth: int = 1) -> dict:
+    """Compact whole-graph orientation map: the SCOPE tree as indented one-line
+    text entries (see `legend`) so an operator grasps the layout without crawling
+    get_subgraph node by node.
+
+    depth bounds the walk: 1 (default) = roots + their direct children, 0 =
+    roots only, -1 = every level. When levels are hidden the response reports
+    how many nodes remain below; expand with get_orient(depth=-1) or zoom into
+    one subtree with get_subgraph(id).
 
     By default this shows the AS-BUILT base only — planned-feature nodes are
     hidden so the map reflects the running system. Pass feature=NAME to overlay
     that feature's planned nodes on top of the base (each marked with its
     feature). Use list_features() to see what features exist.
 
-    Each line in the map contains: z-level indent, id, one-line description,
-    input_types → output_types, status.  Returns {"map": [terse-component, ...]}
-    in pre-order (parents before children) with an "indent" key added per node."""
+    Returns {"map": [line, ...], "count", "total", "legend"} in pre-order
+    (parents before children)."""
     if GRAPH is None:
         return _no_active()
 
@@ -630,39 +701,50 @@ def get_orient(feature: Optional[str] = None) -> dict:
     roots = [c for c in GRAPH.components.values() if c.parent_id is None and in_view(c)]
     roots.sort(key=lambda c: c.component_id)
 
-    result = []
+    result: list[str] = []
 
-    def walk(cid: str, depth: int):
+    def walk(cid: str, level: int):
         c = GRAPH.components.get(cid)
         if c is None or not in_view(c):
             return
-        node = _terse(c)
-        node["indent"] = depth
-        if c.feature:
-            node["feature"] = c.feature
-        result.append(node)
+        if depth != -1 and level > depth:
+            return
+        result.append(_line(c, indent=level))
         for child_id in sorted(c.children):
-            walk(child_id, depth + 1)
+            walk(child_id, level + 1)
 
     for root in roots:
         walk(root.component_id, 0)
 
-    return {"map": result, "count": len(result), "feature": feature}
+    total = sum(1 for c in GRAPH.components.values() if in_view(c))
+    out: dict = {
+        "map": result,
+        "count": len(result),
+        "total": total,
+        "legend": LINE_LEGEND,
+        "feature": feature,
+    }
+    if total > len(result):
+        out["note"] = (
+            f"{total - len(result)} deeper node(s) hidden at depth={depth}; "
+            "use get_orient(depth=-1) or get_subgraph(id) to expand"
+        )
+    return out
 
 
 @mcp.tool()
-def locate(query: str, top_k: int = 8) -> dict:
+def locate(query: str, top_k: int = 4) -> dict:
     """Intent-to-location router: given a keyword or question, returns the most
     relevant components ranked by relevance (id/description/processing match plus
-    structural proximity), each with its terse summary AND its exact file locations
-    so you go from intent to precise code range in one call.
+    structural proximity), one compact text line each (see `legend`) WITH its
+    exact file locations so you go from intent to precise code range in one call.
 
     Args:
         query:  keyword or short phrase to match against component ids,
                 descriptions, and processing text.
-        top_k:  maximum number of results to return (default 8).
+        top_k:  maximum number of results to return (default 4).
 
-    Returns {"matches": [{terse-component + locations + score}]} or {"error": ...}."""
+    Returns {"matches": [line, ...], "legend"} in rank order, or {"error": ...}."""
     if GRAPH is None:
         return _no_active()
     ranked = _rank(GRAPH, query, top_k=top_k)
@@ -671,18 +753,23 @@ def locate(query: str, top_k: int = 8) -> dict:
         c = GRAPH.components.get(cid)
         if c is None:
             continue
-        node = _terse(c, fields=["locations"])
-        node["score"] = round(score, 2)
-        matches.append(node)
-    return {"matches": matches, "query": query}
+        matches.append(_line(c, locations=True))
+    return {"matches": matches, "query": query, "legend": LINE_LEGEND}
 
 
 @mcp.tool()
-def get_component_code(component_id: str) -> dict:
+def get_component_code(component_id: str, max_lines: int = 200) -> dict:
     """Read the actual source for a component from the files in its `locations`.
     Returns the slice [start_line, end_line] (1-indexed, inclusive) for each
     location, or the whole file when no line range is set. Requires locations to
     be set -- high-level components often have none; leaf nodes should.
+
+    Output is budgeted: at most `max_lines` total lines of code (default 200)
+    across all locations. A location cut off by the budget carries
+    `omitted_lines`, and the response carries a `note` -- either raise max_lines
+    or Read the reported path:range directly. Multi-file components list every
+    location even when the budget is spent (with code omitted), so you always
+    see the full anchor set.
 
     Paths resolve relative to the project root. Returns {"locations": [{path,
     start_line, end_line, code}]} or {"error": ...}."""
@@ -695,6 +782,8 @@ def get_component_code(component_id: str) -> dict:
         return {"error": f"Component '{component_id}' has no locations set."}
     root = os.path.realpath(_project_root())
     out = []
+    budget = max_lines
+    truncated = False
     for loc in c.locations:
         # Containment check: a graph file can come from anywhere (shared, checked
         # into a repo), so a location path must not escape the project root via
@@ -711,15 +800,25 @@ def get_component_code(component_id: str) -> dict:
             continue
         start = loc.start_line or 1
         end = loc.end_line or len(lines)
-        out.append(
-            {
-                "path": loc.path,
-                "start_line": start,
-                "end_line": end,
-                "code": "".join(lines[start - 1 : end]),
-            }
+        entry = {"path": loc.path, "start_line": start, "end_line": end}
+        n = end - start + 1
+        if n > budget:
+            truncated = True
+            entry["code"] = "".join(lines[start - 1 : start - 1 + max(budget, 0)])
+            entry["omitted_lines"] = n - max(budget, 0)
+            budget = 0
+        else:
+            entry["code"] = "".join(lines[start - 1 : end])
+            budget -= n
+        out.append(entry)
+    result: dict = {"locations": out}
+    if truncated:
+        result["note"] = (
+            f"output capped at max_lines={max_lines}; locations with "
+            "omitted_lines were cut off -- raise max_lines or Read the "
+            "reported path:range directly"
         )
-    return {"locations": out}
+    return result
 
 
 @mcp.tool()
@@ -788,7 +887,11 @@ def get_work_context(
                 "output_types": cc.output_types,
                 "status": _status(cc),
             }
-    code = get_component_code(component_id).get("locations") if c.locations else None
+    code = (
+        get_component_code(component_id, max_lines=400).get("locations")
+        if c.locations
+        else None
+    )
     _recompute_warnings()
     warns = [
         {"id": w.id, "warning_type": w.warning_type, "affected": w.affected}

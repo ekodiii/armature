@@ -214,12 +214,13 @@ components:
       end_line: 1579
   dispatch-helpers:
     component_id: dispatch-helpers
-    description: 'Internal server utilities: registry/workspace helpers (_load/_save_registry,
-      _valid_name, _active_path, _project_root, _set_active, _no_active), persistence
-      (_recompute_warnings recomputes warnings in memory; _persist also saves), and
-      response shaping (_fetch, _parse_edge_type, _loc_dict, _status, _comp_dict,
-      _terse, _active_count). _set_active now invalidates the cached translation skeleton
-      on graph switch; boot is exception-safe.'
+    description: "Internal server utilities: registry/workspace helpers (_load/_save_registry,\
+      \ _valid_name, _active_path, _project_root, _set_active, _no_active), persistence\
+      \ (_recompute_warnings recomputes warnings in memory; _persist also saves),\
+      \ and response shaping (_fetch, _parse_edge_type, _loc_dict, _status, _comp_dict,\
+      \ _terse, and _line + LINE_LEGEND \u2014 the one-line text formatter behind\
+      \ all terse list views, _active_count). _set_active invalidates the cached translation\
+      \ skeleton on graph switch; boot is exception-safe."
     processing: Provides registry I/O, active-graph resolution, response serialization
       helpers, and guard checks shared across all dispatch handlers.
     input_types:
@@ -231,9 +232,9 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 1
-    implemented_version: 1
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    version: 2
+    implemented_version: 2
+    implemented_sha: 7a323d6617ae4fc64a31b7251516c79119bed7e6
     locations:
     - path: server.py
       start_line: 107
@@ -608,8 +609,8 @@ components:
   query-component-lookup:
     component_id: query-component-lookup
     description: "get_component and search_components handlers \u2014 retrieve a single\
-      \ component by id or search by name/type pattern, returning formatted component\
-      \ dicts."
+      \ component by id (full dict) or search by substring; terse search returns one\
+      \ compact text line per match, capped by limit (default 20)."
     processing: Fetches a component by id from store or filters all components by
       search predicate, then serializes the result using _comp_dict for the LLM response.
     input_types:
@@ -619,9 +620,9 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 2
-    implemented_version: 2
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 3
+    implemented_version: 3
+    implemented_sha: 7a323d6617ae4fc64a31b7251516c79119bed7e6
     locations:
     - path: server.py
       start_line: 442
@@ -655,8 +656,9 @@ components:
     component_id: query-work-context
     description: "get_work_context and get_pending_implementation handlers \u2014\
       \ assemble a scoped LLM working context (component + neighbors + warnings +\
-      \ source), terse-by-default with opt-in field selection. Warning refresh now\
-      \ routes through the in-memory _recompute_warnings helper (no write on read)."
+      \ source), terse-by-default with opt-in field selection. Warning refresh routes\
+      \ through the in-memory _recompute_warnings helper (no write on read); the focal\
+      \ code slice routes through get_component_code with a 400-line budget."
     processing: Assembles the 1-hop frame (target component + neighbors + warnings
       + source snippets) and returns it through the response shaper terse-by-default,
       with field selection so the operator pays only for the fields it requests instead
@@ -668,19 +670,21 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 3
-    implemented_version: 3
-    implemented_sha: 34984cf7bd98852d7f30f625f1583db1edee92cd
+    version: 4
+    implemented_version: 4
+    implemented_sha: 7a323d6617ae4fc64a31b7251516c79119bed7e6
     locations:
     - path: server.py
       start_line: 682
       end_line: 802
   query-code-warnings:
     component_id: query-code-warnings
-    description: get_component_code and get_active_warnings handlers. get_component_code
-      now realpath-contains every location under the project root (rejecting '../'
-      / absolute escapes); get_active_warnings recomputes warnings in memory without
-      writing the graph file.
+    description: "get_component_code and get_active_warnings handlers. get_component_code\
+      \ realpath-contains every location under the project root (rejecting '../' /\
+      \ absolute escapes) and enforces a max_lines budget (default 200) across location\
+      \ slices \u2014 oversized output is truncated with an explicit note and omitted-line\
+      \ counts instead of dumping whole files. get_active_warnings recomputes warnings\
+      \ in memory without writing the graph file."
     processing: Reads source file slices at recorded FileLocation spans and formats
       them alongside the filtered active warning list for LLM inspection.
     input_types:
@@ -691,9 +695,9 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 2
-    implemented_version: 2
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 3
+    implemented_version: 3
+    implemented_sha: 7a323d6617ae4fc64a31b7251516c79119bed7e6
     locations:
     - path: server.py
       start_line: 583
@@ -914,9 +918,12 @@ components:
       end_line: 713
   query-response-shaper:
     component_id: query-response-shaper
-    description: "Terse-by-default response shaper with opt-in field selection \u2014\
-      \ the shared output formatter every read handler routes through, replacing full-dump\
-      \ serialization."
+    description: "Line-oriented response shaper \u2014 the shared output formatter\
+      \ every list-returning read handler routes through. Terse default emits ONE\
+      \ compact text line per component ('id [in -> out] Nch Ne (STATUS unless implemented)\
+      \ :: description', with '@ path:start-end' when locations are requested) instead\
+      \ of a per-node JSON dict (~4-5x token cut); each terse response carries a one-line\
+      \ 'legend' explaining the format. Full dicts remain opt-in via terse=False."
     processing: Given a raw query result and a VerbositySpec, emits a compact view
       by default (id + one-line description + types + neighbor/child counts, not full
       edge-id walls), expanding only explicitly requested fields. This is the core
@@ -929,18 +936,19 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 2
-    implemented_version: 2
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    version: 3
+    implemented_version: 3
+    implemented_sha: 7a323d6617ae4fc64a31b7251516c79119bed7e6
     locations:
     - path: server.py
       start_line: 222
       end_line: 279
   query-orient:
     component_id: query-orient
-    description: 'Compact whole-graph orientation map: one cheap call that returns
-      the entire SCOPE tree as an indented id + one-line summary, so the operator
-      grasps the layout without crawling get_subgraph.'
+    description: Whole-graph orientation map as indented compact text lines (via the
+      line shaper). depth (default 1 = roots + direct children) bounds the walk; depth=-1
+      returns every level. When levels are hidden the response reports how many nodes
+      remain below and how to expand (deeper get_orient or get_subgraph).
     processing: 'Walks the SCOPE hierarchy once and emits a terse indented tree (~1
       token per node: id, one-line description, types) giving whole-system orientation
       in a single low-cost response.'
@@ -951,9 +959,9 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 3
-    implemented_version: 3
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 4
+    implemented_version: 4
+    implemented_sha: 7a323d6617ae4fc64a31b7251516c79119bed7e6
     locations:
     - path: server.py
       start_line: 611
@@ -961,8 +969,9 @@ components:
   query-locate:
     component_id: query-locate
     description: "Intent-to-location router: given a keyword/question, returns the\
-      \ few most relevant components ranked, each WITH its exact code range \u2014\
-      \ collapsing graph\u2192small-read into ~2 hops."
+      \ few most relevant components ranked (top_k default 4), one compact text line\
+      \ each with its exact code ranges (first 5 locations shown, '+N more' beyond)\
+      \ \u2014 collapsing graph\u2192small-read into ~2 hops."
     processing: Ranks components by relevance to a query (id/description/processing
       match plus structural proximity) and returns the top-k with their anchor locations,
       so the operator reads only the precise lines that matter instead of broad grepping.
@@ -973,9 +982,9 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 2
-    implemented_version: 2
-    implemented_sha: 3e6ef19b54d351941eeed4cea586f9704712a4e9
+    version: 3
+    implemented_version: 3
+    implemented_sha: 7a323d6617ae4fc64a31b7251516c79119bed7e6
     locations:
     - path: server.py
       start_line: 610
@@ -1845,10 +1854,11 @@ components:
       end_line: 1374
   dispatch-query-terse:
     component_id: dispatch-query-terse
-    description: 'Terse-mode additions to the five query tools that currently return
-      full component dicts: get_neighbors, get_subgraph, get_impact, search_components,
-      get_references. Adds terse: bool = True (default True) to each, routing output
-      through the existing _terse() shaper.'
+    description: 'Terse-mode defaults on the five query tools (get_neighbors, get_subgraph,
+      get_impact, search_components, get_references): terse=True routes output through
+      the shared line shaper (one text line per component + legend); terse=False returns
+      full component dicts. search_components additionally caps matches (limit, default
+      20) with a truncation note.'
     processing: "Each tool gains a `terse` parameter (default True \u2014 opt-in to\
       \ verbose, not opt-in to terse). When terse=True, each component in the response\
       \ is serialized via _terse() (id + one-line description + types + child/edge\
@@ -1862,9 +1872,9 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 1
-    implemented_version: 1
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 2
+    implemented_version: 2
+    implemented_sha: 7a323d6617ae4fc64a31b7251516c79119bed7e6
     feature: query-terse
     locations:
     - path: server.py
