@@ -31,13 +31,13 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 5
-    implemented_version: 5
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 6
+    implemented_version: 6
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
       start_line: 1
-      end_line: 1689
+      end_line: 1751
   graph-core:
     component_id: graph-core
     description: "In-memory graph substrate \u2014 models, store, writer, validator,\
@@ -135,13 +135,13 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 2
-    implemented_version: 2
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 3
+    implemented_version: 3
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 358
-      end_line: 483
+      start_line: 387
+      end_line: 512
   dispatch-query:
     component_id: dispatch-query
     description: Navigation/query handlers + orientation. get_graph_stats and get_pending_implementation
@@ -162,13 +162,13 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 4
-    implemented_version: 4
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 5
+    implemented_version: 5
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 485
-      end_line: 957
+      start_line: 514
+      end_line: 1002
   dispatch-authoring:
     component_id: dispatch-authoring
     description: "Mutation + reconcile handlers: propose/update/delete_component,\
@@ -187,13 +187,13 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 5
-    implemented_version: 4
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 6
+    implemented_version: 6
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 983
-      end_line: 1208
+      start_line: 1028
+      end_line: 1261
   dispatch-prompts:
     component_id: dispatch-prompts
     description: "Prompt/mode handlers: armature_plan, armature_translate, armature_implement\
@@ -211,13 +211,13 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 4
-    implemented_version: 3
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 5
+    implemented_version: 5
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 1593
-      end_line: 1689
+      start_line: 1650
+      end_line: 1751
   dispatch-helpers:
     component_id: dispatch-helpers
     description: "Internal server utilities: registry/workspace helpers (_load/_save_registry,\
@@ -239,13 +239,13 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 4
-    implemented_version: 3
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 5
+    implemented_version: 5
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
       start_line: 107
-      end_line: 355
+      end_line: 384
   core-models:
     component_id: core-models
     description: "Domain data model \u2014 Component (now carries implemented_sha\
@@ -627,16 +627,16 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 4
-    implemented_version: 4
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 5
+    implemented_version: 5
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 485
-      end_line: 500
+      start_line: 514
+      end_line: 529
     - path: server.py
-      start_line: 554
-      end_line: 584
+      start_line: 583
+      end_line: 613
   query-topology:
     component_id: query-topology
     description: "get_neighbors, get_references, get_subgraph, get_path, get_impact\
@@ -652,13 +652,13 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 2
-    implemented_version: 2
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 3
+    implemented_version: 3
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 501
-      end_line: 647
+      start_line: 530
+      end_line: 676
   query-work-context:
     component_id: query-work-context
     description: "get_work_context and get_pending_implementation handlers \u2014\
@@ -681,16 +681,16 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 6
-    implemented_version: 5
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 7
+    implemented_version: 7
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 824
-      end_line: 922
+      start_line: 853
+      end_line: 967
     - path: server.py
-      start_line: 924
-      end_line: 956
+      start_line: 969
+      end_line: 1001
   query-code-warnings:
     component_id: query-code-warnings
     description: "get_component_code and get_active_warnings handlers. get_component_code\
@@ -709,16 +709,16 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 4
-    implemented_version: 4
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 5
+    implemented_version: 5
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 649
-      end_line: 675
+      start_line: 678
+      end_line: 704
     - path: server.py
-      start_line: 760
-      end_line: 822
+      start_line: 789
+      end_line: 851
   trans-ingestion:
     component_id: trans-ingestion
     description: "Source ingestion (translator/source_ingestion.py) \u2014 si_dir_walker,\
@@ -952,7 +952,7 @@ components:
     parent_id: dispatch-query
     version: 3
     implemented_version: 3
-    implemented_sha: 7a323d6617ae4fc64a31b7251516c79119bed7e6
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
       start_line: 222
@@ -973,13 +973,13 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 5
-    implemented_version: 5
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 6
+    implemented_version: 6
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 677
-      end_line: 733
+      start_line: 706
+      end_line: 762
   query-locate:
     component_id: query-locate
     description: "Intent-to-location router: given a keyword/question, returns the\
@@ -996,13 +996,13 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 4
-    implemented_version: 4
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 5
+    implemented_version: 5
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 735
-      end_line: 758
+      start_line: 764
+      end_line: 787
   ops-rank:
     component_id: ops-rank
     description: "Relevance ranking kernel over components \u2014 scores and orders\
@@ -1425,13 +1425,13 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 2
-    implemented_version: 2
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 3
+    implemented_version: 3
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: server.py
-      start_line: 996
-      end_line: 1103
+      start_line: 1526
+      end_line: 1643
   test-suite:
     component_id: test-suite
     description: "Pytest regression suite (tests/) exercising the graph engine and\
@@ -1510,16 +1510,16 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 1
-    implemented_version: 1
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 2
+    implemented_version: 2
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
     - path: gitsync.py
       start_line: 1
       end_line: 239
     - path: server.py
-      start_line: 1003
-      end_line: 1044
+      start_line: 1226
+      end_line: 1261
   gitsync-diff-mapper:
     component_id: gitsync-diff-mapper
     description: changed_line_ranges parses unified-diff hunks (new-file side) into
@@ -1775,14 +1775,14 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 3
-    implemented_version: 2
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 4
+    implemented_version: 4
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     feature: batch-crud
     locations:
     - path: server.py
-      start_line: 1280
-      end_line: 1374
+      start_line: 1440
+      end_line: 1524
   batch-op-validator:
     component_id: batch-op-validator
     description: 'Pre-flight validator for a batch op list: deserializes each op dict,
@@ -1801,14 +1801,14 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-batch
-    version: 2
-    implemented_version: 2
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 3
+    implemented_version: 3
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     feature: batch-crud
     locations:
     - path: server.py
-      start_line: 1320
-      end_line: 1344
+      start_line: 1480
+      end_line: 1504
   batch-dry-run:
     component_id: batch-dry-run
     description: 'Dry-run executor: replays the ordered MutationRequest list against
@@ -1833,14 +1833,14 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-batch
-    version: 3
-    implemented_version: 3
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 4
+    implemented_version: 4
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     feature: batch-crud
     locations:
     - path: server.py
-      start_line: 1345
-      end_line: 1353
+      start_line: 1505
+      end_line: 1513
   batch-commit:
     component_id: batch-commit
     description: 'Commit phase: replays the validated MutationRequest list against
@@ -1859,14 +1859,14 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-batch
-    version: 2
-    implemented_version: 2
-    implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
+    version: 3
+    implemented_version: 3
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     feature: batch-crud
     locations:
     - path: server.py
-      start_line: 1354
-      end_line: 1374
+      start_line: 1514
+      end_line: 1524
   dispatch-query-terse:
     component_id: dispatch-query-terse
     description: 'Terse-mode defaults on the five query tools (get_neighbors, get_subgraph,
@@ -1887,26 +1887,26 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 3
-    implemented_version: 3
-    implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+    version: 4
+    implemented_version: 4
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     feature: query-terse
     locations:
     - path: server.py
-      start_line: 501
-      end_line: 526
+      start_line: 530
+      end_line: 555
     - path: server.py
-      start_line: 528
-      end_line: 552
+      start_line: 557
+      end_line: 581
     - path: server.py
-      start_line: 554
-      end_line: 584
+      start_line: 583
+      end_line: 613
     - path: server.py
-      start_line: 585
-      end_line: 606
+      start_line: 614
+      end_line: 635
     - path: server.py
-      start_line: 623
-      end_line: 647
+      start_line: 652
+      end_line: 676
   vr-strategy-synthesizer:
     component_id: vr-strategy-synthesizer
     description: "Assembles a runnable pytest + Hypothesis module from a RoutedObligation:\
@@ -2006,14 +2006,14 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 2
-    implemented_version: 2
-    implemented_sha: 46c0dee32a42dd08de7fdc106c7793e0069afb41
+    version: 3
+    implemented_version: 3
+    implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     feature: verification-router
     locations:
     - path: server.py
-      start_line: 1106
-      end_line: 1179
+      start_line: 1262
+      end_line: 1335
 edges:
 - edge_type: FLOW
   from_id: llm-operator
@@ -2503,4 +2503,4 @@ warnings:
     \ by any single entry/exit child node. Justified gap."
 - id: flow_cycle__filesystem_graph-core_translator-pipeline
   ignore_reason: Pre-existing intentional job-queue/architecture loop.
-last_synced_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
+last_synced_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
