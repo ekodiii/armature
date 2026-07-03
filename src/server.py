@@ -334,6 +334,35 @@ def _line(c: Component, locations: bool = False, indent: int = 0) -> str:
     return " ".join(parts)
 
 
+_STUB_DETAIL = {
+    "planned": "no code exists yet (stub)",
+    "stale": "its spec changed after its code was written",
+    "drifted": "its code changed since it was last verified",
+}
+
+
+def _edge_cautions(graph: Graph, from_id: str, to_id: str) -> list[str]:
+    """Stub alerts for both endpoints of a just-created edge."""
+    return [
+        a
+        for role, cid in (("from-endpoint", from_id), ("to-endpoint", to_id))
+        for a in [_stub_alert(role, _get_component(graph, cid))]
+        if a
+    ]
+
+
+def _stub_alert(role: str, c: Component) -> Optional[str]:
+    """One-line alert when a node an agent is about to build against is not
+    actually implemented. Externals are excluded: they derive status 'planned'
+    by construction (nothing of ours to implement), so flagging them is noise.
+    Exp 3 showed agents wire into stubs without noticing unless the signal is
+    pushed at them -- this is that push."""
+    st = _status(c)
+    if c.external or st == "implemented":
+        return None
+    return f"{role} '{c.component_id}' is {st.upper()} -- {_STUB_DETAIL[st]}"
+
+
 # One-line meaning + ignore guidance per warning type. Returned once per type that
 # is present, instead of repeating the full prose message on every warning.
 WARNING_LEGEND = {
@@ -835,6 +864,10 @@ def get_work_context(
 
     It is bounded to the component's 1-hop frame -- not the whole graph -- so it
     stays cheap. Returns:
+      alerts        -- FIRST key, present only when something in the frame is NOT
+                       implemented: this node or a FLOW producer/consumer, child,
+                       or reference that is planned (stub), stale, or drifted.
+                       Do not build against an alerted node without surfacing it.
       component     -- this node's own contract (types, processing, status, locations)
       receives      -- {upstream_id: output_types} it consumes via FLOW
       must_produce  -- {downstream_id: input_types} its output must satisfy
@@ -856,14 +889,23 @@ def get_work_context(
     c, err = _fetch(component_id)
     if err:
         return err
-    receives = {
-        n.component_id: n.output_types
-        for n in _neighbors(GRAPH, component_id, EdgeType.FLOW, upstream=True)
-    }
-    must_produce = {
-        n.component_id: n.input_types
-        for n in _neighbors(GRAPH, component_id, EdgeType.FLOW, upstream=False)
-    }
+    ups = _neighbors(GRAPH, component_id, EdgeType.FLOW, upstream=True)
+    downs = _neighbors(GRAPH, component_id, EdgeType.FLOW, upstream=False)
+    kids = [_get_component(GRAPH, ch) for ch in c.children]
+    refs = _references(GRAPH, component_id)
+    alerts = [
+        a
+        for a in (
+            [_stub_alert("THIS component", c)]
+            + [_stub_alert("upstream producer", n) for n in ups]
+            + [_stub_alert("downstream consumer", n) for n in downs]
+            + [_stub_alert("child", n) for n in kids]
+            + [_stub_alert("referenced component", n) for n in refs]
+        )
+        if a
+    ]
+    receives = {n.component_id: n.output_types for n in ups}
+    must_produce = {n.component_id: n.input_types for n in downs}
     parent = None
     if c.parent_id:
         p = _get_component(GRAPH, c.parent_id)
@@ -874,19 +916,16 @@ def get_work_context(
         }
     children: dict
     if terse:
-        children = {}
-        for ch in c.children:
-            cc = _get_component(GRAPH, ch)
-            children[ch] = _terse(cc, fields=expand_fields)
+        children = {cc.component_id: _terse(cc, fields=expand_fields) for cc in kids}
     else:
-        children = {}
-        for ch in c.children:
-            cc = _get_component(GRAPH, ch)
-            children[ch] = {
+        children = {
+            cc.component_id: {
                 "input_types": cc.input_types,
                 "output_types": cc.output_types,
                 "status": _status(cc),
             }
+            for cc in kids
+        }
     code = (
         get_component_code(component_id, max_lines=400).get("locations")
         if c.locations
@@ -898,27 +937,33 @@ def get_work_context(
         for w in _active_warnings(GRAPH.warnings)
         if w.id.endswith(f"__{component_id}") or component_id in w.affected
     ]
-    return {
-        "component": {
-            "component_id": c.component_id,
-            "description": c.description,
-            "processing": c.processing,
-            "input_types": c.input_types,
-            "output_types": c.output_types,
-            "z_level": c.z_level,
-            "external": c.external,
-            "status": _status(c),
-            "version": c.version,
-            "locations": [_loc_dict(loc) for loc in c.locations],
-        },
-        "receives": receives,
-        "must_produce": must_produce,
-        "parent": parent,
-        "children": children,
-        "references": [n.component_id for n in _references(GRAPH, component_id)],
-        "code": code,
-        "warnings": warns,
-    }
+    out: dict = {}
+    if alerts:
+        out["alerts"] = alerts
+    out.update(
+        {
+            "component": {
+                "component_id": c.component_id,
+                "description": c.description,
+                "processing": c.processing,
+                "input_types": c.input_types,
+                "output_types": c.output_types,
+                "z_level": c.z_level,
+                "external": c.external,
+                "status": _status(c),
+                "version": c.version,
+                "locations": [_loc_dict(loc) for loc in c.locations],
+            },
+            "receives": receives,
+            "must_produce": must_produce,
+            "parent": parent,
+            "children": children,
+            "references": [n.component_id for n in refs],
+            "code": code,
+            "warnings": warns,
+        }
+    )
+    return out
 
 
 @mcp.tool()
@@ -1118,6 +1163,10 @@ def propose_edge(edge_type: str, from_id: str, to_id: str) -> dict:
       when you propose a component with a parent_id. A manual SCOPE edge must point
       from a parent to its direct child exactly one level down.
 
+    If an endpoint is not implemented (planned stub / stale / drifted), the edge
+    is still created but the response carries a `caution` -- surface it before
+    building code that assumes the other side exists.
+
     Returns {"ok": True, "active_warnings": <count>} or {"ok": False, "errors": [...]}."""
     if GRAPH is None:
         return _no_active()
@@ -1128,7 +1177,11 @@ def propose_edge(edge_type: str, from_id: str, to_id: str) -> dict:
     if errors:
         return {"ok": False, "errors": errors}
     _persist()
-    return {"ok": True, "edge": f"{from_id} -> {to_id} ({et.value})", "active_warnings": _active_count()}
+    out: dict = {"ok": True, "edge": f"{from_id} -> {to_id} ({et.value})", "active_warnings": _active_count()}
+    cautions = _edge_cautions(GRAPH, from_id, to_id)
+    if cautions:
+        out["caution"] = cautions
+    return out
 
 
 @mcp.tool()
@@ -1353,7 +1406,11 @@ def _apply_batch_op(graph: Graph, index: int, op: dict) -> dict:
         errors = _propose_edge(graph, Edge(et, op["from_id"], op["to_id"]))
         if errors:
             return {"index": index, "op": verb, "ok": False, "error": errors[0]}
-        return {"index": index, "op": verb, "ok": True, "id": f"{op['from_id']} -> {op['to_id']} ({et.value})"}
+        result = {"index": index, "op": verb, "ok": True, "id": f"{op['from_id']} -> {op['to_id']} ({et.value})"}
+        cautions = _edge_cautions(graph, op["from_id"], op["to_id"])
+        if cautions:
+            result["caution"] = cautions
+        return result
 
     if verb == "delete_edge":
         et, err = _parse_edge_type(op["edge_type"])
@@ -1675,6 +1732,11 @@ def armature_implement() -> str:
         "     verify their work against the contract with them.\n"
         "5. Before calling mark_implemented(id), confirm ALL contracts in scope are\n"
         "   satisfied: inputs covered, outputs produced, no broken edges.\n\n"
+        "TREAT `alerts` AND `caution`s AS BLOCKING. When get_work_context leads with\n"
+        "`alerts`, or propose_edge returns a `caution`, a node you are building against\n"
+        "is planned (a stub -- its code does NOT exist), stale, or drifted. Do not\n"
+        "assume its declared outputs work at runtime: surface the alert to the human\n"
+        "and decide together whether to build it first, mock it, or proceed knowingly.\n\n"
         "If reality does not match the spec -- STOP. Surface the discrepancy. Ask:\n"
         "  - Does the artifact need to change? -> continue implementing.\n"
         "  - Does the graph need to change? -> switch to /armature_plan first, then return.\n"

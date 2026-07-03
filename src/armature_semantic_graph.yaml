@@ -173,7 +173,10 @@ components:
     component_id: dispatch-authoring
     description: "Mutation + reconcile handlers: propose/update/delete_component,\
       \ propose_edge, delete_edge, mark_implemented (stamps git HEAD), ignore_warning,\
-      \ and reconcile() \u2014 the git-sync drift detector exposed to the operator."
+      \ and reconcile() \u2014 the git-sync drift detector exposed to the operator.\
+      \ propose_edge returns a `caution` list when wiring a FLOW/REFERENCE edge to\
+      \ a non-implemented (planned/stale/drifted) endpoint, so agents never wire into\
+      \ stubs blind."
     processing: Validates and forwards component/edge mutation requests to writer,
       then re-runs warning checks and returns updated warning counts.
     input_types:
@@ -184,7 +187,7 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 4
+    version: 5
     implemented_version: 4
     implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
     locations:
@@ -195,7 +198,10 @@ components:
     component_id: dispatch-prompts
     description: "Prompt/mode handlers: armature_plan, armature_translate, armature_implement\
       \ \u2014 return rich contextual system prompts that configure the LLM operator\
-      \ for a specific working mode."
+      \ for a specific working mode. The implement prompt instructs the operator to\
+      \ treat get_work_context `alerts` and propose_edge `caution`s as blocking signals:\
+      \ surface a planned/stale/drifted dependency to the human before building against\
+      \ it."
     processing: Returns mode-specific instruction prompts (plan, translate, implement)
       that orient the LLM operator with graph state and task-specific guidance.
     input_types:
@@ -205,7 +211,7 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 3
+    version: 4
     implemented_version: 3
     implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
     locations:
@@ -218,9 +224,10 @@ components:
       \ _valid_name, _active_path, _project_root, _set_active, _no_active), persistence\
       \ (_recompute_warnings recomputes warnings in memory; _persist also saves),\
       \ and response shaping (_fetch, _parse_edge_type, _loc_dict, _status, _comp_dict,\
-      \ _terse, and _line + LINE_LEGEND \u2014 the one-line text formatter behind\
-      \ all terse list views, _active_count). _set_active invalidates the cached translation\
-      \ skeleton on graph switch; boot is exception-safe."
+      \ _terse, _line + LINE_LEGEND \u2014 the one-line text formatter behind all\
+      \ terse list views, _stub_alert \u2014 the planned/stale/drifted dependency\
+      \ flagger behind work-context alerts and edge cautions, _active_count). _set_active\
+      \ invalidates the cached translation skeleton on graph switch; boot is exception-safe."
     processing: Provides registry I/O, active-graph resolution, response serialization
       helpers, and guard checks shared across all dispatch handlers.
     input_types:
@@ -232,7 +239,7 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 3
+    version: 4
     implemented_version: 3
     implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
     locations:
@@ -656,9 +663,13 @@ components:
     component_id: query-work-context
     description: "get_work_context and get_pending_implementation handlers \u2014\
       \ assemble a scoped LLM working context (component + neighbors + warnings +\
-      \ source), terse-by-default with opt-in field selection. Warning refresh routes\
-      \ through the in-memory _recompute_warnings helper (no write on read); the focal\
-      \ code slice routes through get_component_code with a 400-line budget."
+      \ source), terse-by-default with opt-in field selection. The response LEADS\
+      \ with an `alerts` list flagging the focal node and any connected node (FLOW\
+      \ producers/consumers, children, references) whose status is planned/stale/drifted\
+      \ \u2014 non-implemented dependencies are pushed at the agent instead of relying\
+      \ on it to notice (externals excluded). Warning refresh routes through the in-memory\
+      \ _recompute_warnings helper (no write on read); the focal code slice routes\
+      \ through get_component_code with a 400-line budget."
     processing: Assembles the 1-hop frame (target component + neighbors + warnings
       + source snippets) and returns it through the response shaper terse-by-default,
       with field selection so the operator pays only for the fields it requests instead
@@ -670,7 +681,7 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 5
+    version: 6
     implemented_version: 5
     implemented_sha: bfe6f85a97f418e610fb069959245d52fb2abed8
     locations:
@@ -1749,7 +1760,8 @@ components:
     description: "Batch mutation tool surface \u2014 a single `batch_mutate(ops)`\
       \ MCP tool that accepts a list of heterogeneous authoring operations and applies\
       \ them atomically: validate all against an in-memory scratch copy first, then\
-      \ write to the real graph and persist once on success."
+      \ write to the real graph and persist once on success. propose_edge op results\
+      \ carry the same stub-endpoint `caution` as the standalone tool."
     processing: Receives a list of ops (`propose_component`, `update_component`, `delete_component`,
       `propose_edge`, `delete_edge`, `mark_implemented`). Deep-copies the active graph,
       replays all ops through the same writer functions against the copy (fail-fast
@@ -1763,7 +1775,7 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 2
+    version: 3
     implemented_version: 2
     implemented_sha: 542f989e720974ea025e33f9c922aca49910afad
     feature: batch-crud
