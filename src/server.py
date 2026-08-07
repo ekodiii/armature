@@ -71,6 +71,7 @@ from gitsync import (
     GitError as _GitError,
     current_head as _current_head,
     reconcile as _reconcile,
+    drift_diff as _drift_diff_git,
 )
 from store import get_component as _get_component, remove_edge as _remove_edge
 from graph_warnings import (
@@ -361,6 +362,41 @@ def _stub_alert(role: str, c: Component) -> Optional[str]:
     if c.external or st == "implemented":
         return None
     return f"{role} '{c.component_id}' is {st.upper()} -- {_STUB_DETAIL[st]}"
+
+
+# Shared between the top-level `drift` key and per-connected-node alerts: the
+# demotion/adapt-or-stop policy an agent must follow once a diff shows the code
+# moved out from under a spec. A controlled experiment showed a bare "drifted"
+# alert gets overridden -- agents force code back to match the stale spec --
+# unless the diff itself, and this instruction, are put in front of them.
+_DRIFT_POLICY = (
+    "Do NOT restore old symbols or shapes this diff shows were removed or replaced."
+)
+
+
+def _drift_diff(c: Component, max_lines: int = 120) -> Optional[str]:
+    """Capped unified diff of a drifted component's anchored code since its
+    verified baseline (gitsync.drift_diff does the git work). None when the
+    component is not drifted, has no locations, has no recorded baseline sha,
+    or git could not produce a diff -- callers must treat None as 'nothing to
+    show', never as an error."""
+    if not c.code_drifted or not c.implemented_sha or not c.locations:
+        return None
+    paths = [loc.path for loc in c.locations]
+    return _drift_diff_git(_project_root(), c.implemented_sha, paths, max_lines=max_lines)
+
+
+def _connected_alert(role: str, c: Component) -> Optional[str]:
+    """Like _stub_alert, but when the node itself is drifted (not the focal
+    node -- that gets the full top-level `drift` key instead) also appends a
+    shorter capped diff and the do-not-restore policy, so a stale dependency's
+    alert line carries the same demotion the focal spec gets."""
+    a = _stub_alert(role, c)
+    if a and c.code_drifted:
+        diff = _drift_diff(c, max_lines=60)
+        if diff is not None:
+            a += f" | diff since {c.implemented_sha}:\n{diff}\n{_DRIFT_POLICY}"
+    return a
 
 
 # One-line meaning + ignore guidance per warning type. Returned once per type that
@@ -868,6 +904,16 @@ def get_work_context(
                        implemented: this node or a FLOW producer/consumer, child,
                        or reference that is planned (stub), stale, or drifted.
                        Do not build against an alerted node without surfacing it.
+                       A connected node's alert line carries its own capped
+                       diff when IT is drifted (see `drift` below).
+      drift         -- present only when THIS component is drifted: {baseline,
+                       diff, note}. `diff` is the capped unified diff of its
+                       anchored code since `baseline` (its verified sha) -- the
+                       ground truth when the spec text below no longer matches
+                       reality. `component.processing` is prefixed
+                       '[UNVERIFIED ...]' in this case; adapt to the diff, or
+                       stop and re-plan the spec. Never restore a symbol or
+                       shape the diff shows was removed or replaced.
       component     -- this node's own contract (types, processing, status, locations)
       receives      -- {upstream_id: output_types} it consumes via FLOW
       must_produce  -- {downstream_id: input_types} its output must satisfy
@@ -897,13 +943,29 @@ def get_work_context(
         a
         for a in (
             [_stub_alert("THIS component", c)]
-            + [_stub_alert("upstream producer", n) for n in ups]
-            + [_stub_alert("downstream consumer", n) for n in downs]
-            + [_stub_alert("child", n) for n in kids]
-            + [_stub_alert("referenced component", n) for n in refs]
+            + [_connected_alert("upstream producer", n) for n in ups]
+            + [_connected_alert("downstream consumer", n) for n in downs]
+            + [_connected_alert("child", n) for n in kids]
+            + [_connected_alert("referenced component", n) for n in refs]
         )
         if a
     ]
+    drift = None
+    if c.code_drifted:
+        diff = _drift_diff(c, max_lines=120)
+        if diff is not None:
+            drift = {
+                "baseline": c.implemented_sha,
+                "diff": diff,
+                "note": (
+                    "This component's code changed AFTER its spec was written. "
+                    "The spec below is UNVERIFIED where it names symbols, "
+                    "signatures, or line ranges -- the DIFF is the truth. Adapt "
+                    "to the as-built code, or stop and re-plan the spec. Do NOT "
+                    "restore old symbols or shapes the diff shows were removed "
+                    "or replaced."
+                ),
+            }
     receives = {n.component_id: n.output_types for n in ups}
     must_produce = {n.component_id: n.input_types for n in downs}
     parent = None
@@ -937,15 +999,23 @@ def get_work_context(
         for w in _active_warnings(GRAPH.warnings)
         if w.id.endswith(f"__{component_id}") or component_id in w.affected
     ]
+    processing = c.processing
+    if drift:
+        processing = (
+            "[UNVERIFIED -- code drifted since this spec was written; see "
+            "`drift.diff`] " + processing
+        )
     out: dict = {}
     if alerts:
         out["alerts"] = alerts
+    if drift:
+        out["drift"] = drift
     out.update(
         {
             "component": {
                 "component_id": c.component_id,
                 "description": c.description,
-                "processing": c.processing,
+                "processing": processing,
                 "input_types": c.input_types,
                 "output_types": c.output_types,
                 "z_level": c.z_level,
@@ -1737,6 +1807,15 @@ def armature_implement() -> str:
         "is planned (a stub -- its code does NOT exist), stale, or drifted. Do not\n"
         "assume its declared outputs work at runtime: surface the alert to the human\n"
         "and decide together whether to build it first, mock it, or proceed knowingly.\n\n"
+        "DRIFT OUTRANKS THE SPEC. When get_work_context also returns a `drift` key,\n"
+        "its `diff` is the ground truth for what the code actually is now -- the spec\n"
+        "text (including `component.processing`, prefixed '[UNVERIFIED ...]' in this\n"
+        "case) is unverified wherever it names symbols, signatures, or line ranges the\n"
+        "diff touched. Adapt the artifact to the as-built code, or stop and take the\n"
+        "mismatch to /armature_plan to update the spec. Never restore a symbol, method,\n"
+        "or shape the diff shows was removed or replaced just because the old spec\n"
+        "still names it -- the same rule applies to a drifted dependency's alert line,\n"
+        "which carries its own diff.\n\n"
         "If reality does not match the spec -- STOP. Surface the discrepancy. Ask:\n"
         "  - Does the artifact need to change? -> continue implementing.\n"
         "  - Does the graph need to change? -> switch to /armature_plan first, then return.\n"

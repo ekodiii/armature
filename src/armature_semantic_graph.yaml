@@ -199,11 +199,15 @@ components:
     description: "Prompt/mode handlers: armature_plan, armature_translate, armature_implement\
       \ \u2014 return rich contextual system prompts that configure the LLM operator\
       \ for a specific working mode. The implement prompt instructs the operator to\
-      \ treat get_work_context `alerts` and propose_edge `caution`s as blocking signals:\
-      \ surface a planned/stale/drifted dependency to the human before building against\
-      \ it."
+      \ treat get_work_context `alerts` and propose_edge `caution`s as blocking signals,\
+      \ and additionally states the drift policy: when get_work_context returns a\
+      \ `drift` key, its diff is authoritative over the spec text -- adapt the artifact\
+      \ to the as-built code or stop and re-plan the spec via /armature_plan, and\
+      \ never restore a symbol/method/shape the diff shows was removed or replaced\
+      \ just because the old spec still names it."
     processing: Returns mode-specific instruction prompts (plan, translate, implement)
-      that orient the LLM operator with graph state and task-specific guidance.
+      that orient the LLM operator with graph state, task-specific guidance, and (for
+      implement) the drift-diff authority policy.
     input_types:
     - McpToolCall
     output_types:
@@ -211,7 +215,7 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 5
+    version: 6
     implemented_version: 5
     implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
@@ -226,10 +230,14 @@ components:
       \ and response shaping (_fetch, _parse_edge_type, _loc_dict, _status, _comp_dict,\
       \ _terse, _line + LINE_LEGEND \u2014 the one-line text formatter behind all\
       \ terse list views, _stub_alert \u2014 the planned/stale/drifted dependency\
-      \ flagger behind work-context alerts and edge cautions, _active_count). _set_active\
-      \ invalidates the cached translation skeleton on graph switch; boot is exception-safe."
+      \ flagger behind work-context alerts and edge cautions, _drift_diff \u2014 thin\
+      \ wrapper over gitsync's drift_diff plumbing that resolves a component's anchored\
+      \ paths + project root and caps the diff for response inclusion, _active_count).\
+      \ _set_active invalidates the cached translation skeleton on graph switch; boot\
+      \ is exception-safe."
     processing: Provides registry I/O, active-graph resolution, response serialization
-      helpers, and guard checks shared across all dispatch handlers.
+      helpers (including drift-diff resolution for a component), and guard checks
+      shared across all dispatch handlers.
     input_types:
     - GraphRegistry
     - Graph
@@ -239,7 +247,7 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 5
+    version: 6
     implemented_version: 5
     implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
@@ -667,11 +675,21 @@ components:
       \ with an `alerts` list flagging the focal node and any connected node (FLOW\
       \ producers/consumers, children, references) whose status is planned/stale/drifted\
       \ \u2014 non-implemented dependencies are pushed at the agent instead of relying\
-      \ on it to notice (externals excluded). Warning refresh routes through the in-memory\
-      \ _recompute_warnings helper (no write on read); the focal code slice routes\
-      \ through get_component_code with a 400-line budget."
+      \ on it to notice (externals excluded). When the FOCAL component is code_drifted,\
+      \ a top-level `drift` key (baseline sha + capped unified diff since baseline\
+      \ + a demotion/adapt-or-stop policy note) follows `alerts`, and the returned\
+      \ component's `processing` text is prefixed '[UNVERIFIED -- code drifted ...]'\
+      \ rather than mutated in storage -- a controlled experiment showed the stale\
+      \ spec text alone gets agents to force code back to it, overriding the plain\
+      \ drift alert, so the diff (not just the flag) must be surfaced as the authority.\
+      \ Connected drifted nodes get their existing alert line extended with a shorter\
+      \ capped diff + the same do-not-restore policy sentence. Warning refresh routes\
+      \ through the in-memory _recompute_warnings helper (no write on read); the focal\
+      \ code slice routes through get_component_code with a 400-line budget."
     processing: Assembles the 1-hop frame (target component + neighbors + warnings
-      + source snippets) and returns it through the response shaper terse-by-default,
+      + source snippets), computes a drift diff via gitsync for the focal node and
+      any drifted connected node when a baseline sha exists, demotes the focal spec
+      text when drifted, and returns everything through the response shaper terse-by-default,
       with field selection so the operator pays only for the fields it requests instead
       of a fixed dense payload.
     input_types:
@@ -681,7 +699,7 @@ components:
     z_level: 2
     external: false
     parent_id: dispatch-query
-    version: 7
+    version: 8
     implemented_version: 7
     implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:
@@ -1495,13 +1513,18 @@ components:
     locations: []
   git-sync:
     component_id: git-sync
-    description: Drift reconciliation against git (IMPLEMENTED). Diffs each implemented
+    description: 'Drift reconciliation against git (IMPLEMENTED). Diffs each implemented
       component against the commit its code was verified at and flags those whose
-      anchored code moved, via reconcile(). Closes the out-of-band-edit loop; surfaced
-      as the reconcile() MCP tool.
+      anchored code moved, via reconcile(). Also exposes drift_diff(): given a component''s
+      baseline sha and anchored paths, produces the capped unified `git diff <sha>..HEAD
+      -- <paths>` (never raises -- missing git or missing baseline returns None) that
+      get_work_context surfaces as ground truth when a spec is stale relative to as-built
+      code. Closes the out-of-band-edit loop; surfaced as the reconcile() MCP tool.'
     processing: 'On reconcile: diff since last-synced SHA -> components whose anchored
-      line ranges overlap changed hunks -> mark code-drifted; store new SHA. Requires
-      a per-component implemented-against-SHA (model extension).'
+      line ranges overlap changed hunks -> mark code-drifted; store new SHA. On drift_diff:
+      git diff <baseline>..HEAD for the given paths, truncated to a line budget with
+      an explicit truncation note. Requires a per-component implemented-against-SHA
+      (model extension).'
     input_types:
     - GitDiff
     output_types:
@@ -1510,7 +1533,7 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 2
+    version: 3
     implemented_version: 2
     implemented_sha: 3eae206b09624be27fdaa57643ad90982f6fe1b8
     locations:

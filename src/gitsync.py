@@ -100,6 +100,41 @@ def changed_line_ranges(
     return ranges
 
 
+def drift_diff(
+    root: str,
+    base: Optional[str],
+    paths: list,
+    max_lines: int = 120,
+) -> Optional[str]:
+    """Unified `git diff <base>..HEAD -- <paths>` for a drifted component's
+    anchored files -- the ground truth handed to an agent in place of (or
+    alongside) a spec that may now describe code that no longer exists.
+
+    `paths` are interpreted relative to `root` (project-root-relative anchor
+    paths work directly here, unlike changed_line_ranges, since git pathspecs
+    on the command line are resolved against the -C directory, not the repo
+    root). Capped at `max_lines` with a trailing truncation note pointing at
+    the full command. Never raises: no git, no repo, an unresolvable `base`,
+    or no paths all yield None so a missing baseline degrades gracefully
+    instead of breaking the read tool that calls this."""
+    if not base or not paths:
+        return None
+    try:
+        diff = _git(root, "diff", "--no-color", f"{base}..HEAD", "--", *paths)
+    except GitError:
+        return None
+    if not diff.strip():
+        return None
+    lines = diff.splitlines()
+    if len(lines) > max_lines:
+        kept = lines[:max_lines]
+        kept.append(
+            f"... diff truncated; run `git diff {base}..HEAD -- {' '.join(paths)}` for the rest"
+        )
+        return "\n".join(kept)
+    return diff
+
+
 # ---------------------------------------------------------------------------
 # gitsync-diff-mapper: changed hunks -> affected components
 # ---------------------------------------------------------------------------
