@@ -174,11 +174,16 @@ components:
     description: "Mutation + reconcile handlers: propose/update/delete_component,\
       \ propose_edge, delete_edge, mark_implemented (stamps git HEAD), ignore_warning,\
       \ and reconcile() \u2014 the git-sync drift detector exposed to the operator.\
-      \ propose_edge returns a `caution` list when wiring a FLOW/REFERENCE edge to\
-      \ a non-implemented (planned/stale/drifted) endpoint, so agents never wire into\
-      \ stubs blind."
+      \ reconcile()'s response now includes `shifted`: anchors it auto-relocated to\
+      \ HEAD coordinates this pass (lossless for clean components, best-effort for\
+      \ drifted ones), alongside the existing drifted/recovered/no_baseline/checked/clean\
+      \ fields. propose_edge returns a `caution` list when wiring a FLOW/REFERENCE\
+      \ edge to a non-implemented (planned/stale/drifted) endpoint, so agents never\
+      \ wire into stubs blind."
     processing: Validates and forwards component/edge mutation requests to writer,
-      then re-runs warning checks and returns updated warning counts.
+      then re-runs warning checks and returns updated warning counts. reconcile()
+      forwards gitsync.reconcile()'s report (including shifted) directly into the
+      tool response.
     input_types:
     - McpToolCall
     output_types:
@@ -187,7 +192,7 @@ components:
     z_level: 1
     external: false
     parent_id: mcp-dispatch
-    version: 7
+    version: 8
     implemented_version: 7
     implemented_sha: 7e7ca240aec9516c2e732258d8a16fe98a8cb368
     locations:
@@ -1513,18 +1518,32 @@ components:
     locations: []
   git-sync:
     component_id: git-sync
-    description: 'Drift reconciliation against git (IMPLEMENTED). Diffs each implemented
-      component against the commit its code was verified at and flags those whose
-      anchored code moved, via reconcile(). Also exposes drift_diff(): given a component''s
-      baseline sha and anchored paths, produces the capped unified `git diff <sha>..HEAD
-      -- <paths>` (never raises -- missing git or missing baseline returns None) that
-      get_work_context surfaces as ground truth when a spec is stale relative to as-built
-      code. Closes the out-of-band-edit loop; surfaced as the reconcile() MCP tool.'
-    processing: 'On reconcile: diff since last-synced SHA -> components whose anchored
-      line ranges overlap changed hunks -> mark code-drifted; store new SHA. On drift_diff:
-      git diff <baseline>..HEAD for the given paths, truncated to a line budget with
-      an explicit truncation note. Requires a per-component implemented-against-SHA
-      (model extension).'
+    description: 'Drift reconciliation against git (IMPLEMENTED), with auto-tracking
+      of anchor line-shift. Diffs each implemented component against the commit its
+      code was verified at and flags those whose anchored code moved, via reconcile().
+      Anchors are stored in the line coordinates of their own implemented_sha baseline
+      (the OLD side of any later diff), so drift intersection uses OLD-file-side hunk
+      ranges, not HEAD-side ones -- a coordinate mismatch there is a false-clean (code
+      that changed under a shifted anchor goes undetected). A component that is NOT
+      drifted has still likely moved (lines inserted/deleted above it); reconcile
+      auto-shifts its anchors to HEAD coordinates via an offset map and advances its
+      own implemented_sha to HEAD (lossless -- content unchanged, only position moved),
+      unifying all clean components onto HEAD coordinates every reconcile. A DRIFTED
+      component''s anchors are best-effort shifted too (snap semantics) so drift_diff/get_component_code
+      still land near the right region, but its flag and baseline are left for mark_implemented.
+      Also exposes drift_diff(): given a component''s baseline sha and anchored paths,
+      produces the capped unified `git diff <sha>..HEAD -- <paths>` (never raises
+      -- missing git or missing baseline returns None) that get_work_context surfaces
+      as ground truth when a spec is stale relative to as-built code. Closes the out-of-band-edit
+      loop; surfaced as the reconcile() MCP tool.'
+    processing: 'On reconcile, per distinct baseline: parse_hunks(base..HEAD) -> old-side
+      ranges intersected against stored (baseline-coordinate) anchors -> mark code-drifted
+      on overlap. Then, for every anchor in a touched file (drifted or not), map_line()
+      shifts start/end from baseline to HEAD coordinates (snap-to-hunk-bounds inside
+      an edit, running offset below it); not-drifted components also get implemented_sha
+      advanced to HEAD. Report lists shifted anchors as {component_id, path, old,
+      new}. On drift_diff: git diff <baseline>..HEAD for the given paths, truncated
+      to a line budget with an explicit truncation note.'
     input_types:
     - GitDiff
     output_types:
@@ -1533,7 +1552,7 @@ components:
     z_level: 0
     external: false
     parent_id: null
-    version: 4
+    version: 5
     implemented_version: 4
     implemented_sha: 7e7ca240aec9516c2e732258d8a16fe98a8cb368
     locations:
@@ -1545,11 +1564,22 @@ components:
       end_line: 1331
   gitsync-diff-mapper:
     component_id: gitsync-diff-mapper
-    description: changed_line_ranges parses unified-diff hunks (new-file side) into
-      per-file line ranges; diff_mapper intersects them with component anchors (whole-file
-      anchors match any change), translating project-root-relative paths to repo-root-relative.
-    processing: Intersect diff hunks with component FileLocation ranges; emit the
-      overlap set. (Line-shift auto-tracking is a later refinement.)
+    description: parse_hunks parses unified-diff hunks into per-file Hunk(old_start,
+      old_n, new_start, new_n) lists, capturing both diff sides. changed_line_ranges
+      collapses those into per-file (start,end) ranges on a requested `side` ("new"
+      default for HEAD-coordinate readers, "old" for baseline-coordinate anchors).
+      diff_mapper intersects ranges with component anchors (whole-file anchors match
+      any change), translating project-root-relative paths to repo-root-relative.
+      map_line shifts a single baseline line number to HEAD coordinates using the
+      same Hunk list -- lines inside a replaced/deleted hunk snap to its new bounds
+      (expanding the range to cover the edit), pure insertions push only lines strictly
+      after their anchor point, and lines below accumulate a running (new_n - old_n)
+      offset.
+    processing: 'Parse hunks (both sides) from `git diff --unified=0`. For drift:
+      intersect OLD-side ranges with component FileLocation ranges (baseline coordinates)
+      -- using NEW-side ranges there is a coordinate mismatch and produces false-cleans.
+      For shifting: map_line() walks the same Hunk list to relocate each anchor''s
+      start/end to HEAD coordinates.'
     input_types:
     - GitDiff
     output_types:
@@ -1557,7 +1587,7 @@ components:
     z_level: 1
     external: false
     parent_id: git-sync
-    version: 2
+    version: 3
     implemented_version: 2
     implemented_sha: 7e7ca240aec9516c2e732258d8a16fe98a8cb368
     locations:
@@ -1568,9 +1598,15 @@ components:
     component_id: gitsync-drift-marker
     description: 'The reconcile driver''s marking pass: per implemented component,
       diff its baseline (implemented_sha, else since/last_synced_sha) against HEAD;
-      set code_drifted on overlap, clear it on revert, report missing baselines.'
+      set code_drifted on overlap (using OLD-side hunk ranges against baseline-coordinate
+      anchors), clear it on revert, report missing baselines. Also shifts every anchor
+      in a touched file to HEAD coordinates via map_line (lossless snap when clean,
+      best-effort snap when drifted) and, for non-drifted components, advances implemented_sha
+      to HEAD.'
     processing: Set or compare implemented_sha per component; surface those whose
-      anchored files changed since.
+      anchored files changed since (old-side overlap). Rewrite FileLocation.start_line/end_line
+      in place via map_line for every anchor in a hunk-touched file; advance implemented_sha
+      to HEAD when not drifted.
     input_types:
     - DriftCandidateSet
     output_types:
@@ -1578,7 +1614,7 @@ components:
     z_level: 1
     external: false
     parent_id: git-sync
-    version: 2
+    version: 3
     implemented_version: 2
     implemented_sha: 7e7ca240aec9516c2e732258d8a16fe98a8cb368
     locations:
@@ -1587,10 +1623,12 @@ components:
       end_line: 274
   gitsync-reporter:
     component_id: gitsync-reporter
-    description: ReconcileReport (drifted/recovered/no_baseline/checked) assembled
-      by reconcile, which also advances the graph's last_synced_sha to HEAD.
-    processing: Summarize drifted components + reasons; persist last_synced_sha on
-      the graph.
+    description: ReconcileReport (drifted/recovered/no_baseline/shifted/checked) assembled
+      by reconcile, which also advances the graph's last_synced_sha to HEAD. `shifted`
+      lists every anchor reconcile relocated this pass as {component_id, path, old:[s,e],
+      new:[s,e]}.
+    processing: Summarize drifted components + reasons, plus every anchor shift performed;
+      persist last_synced_sha on the graph.
     input_types:
     - DriftCandidateSet
     output_types:
@@ -1598,7 +1636,7 @@ components:
     z_level: 1
     external: false
     parent_id: git-sync
-    version: 2
+    version: 3
     implemented_version: 2
     implemented_sha: 7e7ca240aec9516c2e732258d8a16fe98a8cb368
     locations:

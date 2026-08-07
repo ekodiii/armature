@@ -1305,11 +1305,20 @@ def reconcile(since: Optional[str] = None, include_uncommitted: bool = False) ->
     Components with no baseline are reported so you can re-mark them. Advances
     last_synced_sha to HEAD.
 
+    A component that is NOT drifted has still likely moved in the file (code
+    inserted or deleted above it) -- its anchors are auto-shifted to HEAD
+    coordinates and its own baseline is advanced to HEAD, since that's lossless
+    (content unchanged, only position moved). A DRIFTED component's anchors are
+    also best-effort shifted (so drift_diff/get_component_code still point near
+    the right region) but its flag and baseline are left for mark_implemented.
+    Every such shift is listed in `shifted`.
+
     - since: optional commit to diff from for components lacking their own baseline.
     - include_uncommitted: also count working-tree edits not yet committed.
 
     Returns {ok, head, drifted:[{component_id, paths}], recovered:[...],
-    no_baseline:[...], checked, clean} or {"error": ...}."""
+    no_baseline:[...], shifted:[{component_id, path, old:[s,e], new:[s,e]}],
+    checked, clean} or {"error": ...}."""
     if GRAPH is None:
         return _no_active()
     try:
@@ -1324,6 +1333,7 @@ def reconcile(since: Optional[str] = None, include_uncommitted: bool = False) ->
         "drifted": [{"component_id": cid, "paths": paths} for cid, paths in report.drifted],
         "recovered": report.recovered,
         "no_baseline": report.no_baseline,
+        "shifted": report.shifted,
         "checked": report.checked,
         "clean": report.is_clean,
     }

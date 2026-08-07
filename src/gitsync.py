@@ -8,10 +8,30 @@ components whose anchored line ranges overlap changed code, and marks them
 code-drifted. git is the source of truth for "the code moved"; reconcile is the
 act of synchronizing the graph's drift flags with that truth.
 
+Stored anchors (FileLocation.start_line/end_line) are recorded in the line
+coordinates of whatever commit the component was last verified at
+(implemented_sha) -- the OLD side of any later diff, not the new/HEAD side.
+Two consequences drive this module's design:
+
+1. Drift detection must intersect changed hunks against anchors using the
+   OLD-file-side hunk ranges. Intersecting new-side ranges against
+   baseline-coordinate anchors is a coordinate mismatch: an insertion above an
+   anchor shifts its true position in the new file, and a hunk that lands
+   exactly on that shifted position can miss the (differently-numbered) stored
+   range entirely -- a false-clean. See `parse_hunks` / `map_line`.
+2. A component whose code did NOT drift has still likely moved (anything
+   inserted or deleted above it in the file). reconcile() auto-shifts such
+   components' anchors to HEAD coordinates and advances their baseline --
+   lossless, since the content is unchanged and only its position moved. A
+   drifted component's anchors are best-effort shifted too (so drift_diff and
+   get_component_code still point near the right region) but its flag and
+   baseline are left for mark_implemented to clear, same as before.
+
 Pure-ish: the only side effect is shelling out to `git` (read-only) and setting
-`code_drifted` / `last_synced_sha` on the in-memory graph. Persistence is the
-caller's job. Mirrors the graph spec: diff_mapper -> mark_drift -> reconcile
-(gitsync-diff-mapper / gitsync-drift-marker / gitsync-reporter).
+`code_drifted` / `implemented_sha` / anchor coordinates / `last_synced_sha` on
+the in-memory graph. Persistence is the caller's job. Mirrors the graph spec:
+diff_mapper -> mark_drift -> reconcile (gitsync-diff-mapper /
+gitsync-drift-marker / gitsync-reporter).
 """
 
 from __future__ import annotations
@@ -56,30 +76,43 @@ def current_head(root: str) -> str:
     return _git(root, "rev-parse", "HEAD").strip()
 
 
-# A unified-diff hunk header: @@ -old,len +new,len @@ . We only care about the
-# new-file side (where the current code lives, which is what anchors point at).
-_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+# A unified-diff hunk header: @@ -old_start,old_len +new_start,new_len @@ . Both
+# sides are captured: the old side is where stored (baseline) anchor
+# coordinates live, the new side is where HEAD coordinates live. A missing
+# ",len" means length 1; an explicit ",0" means a pure insertion (old side) or
+# pure deletion (new side).
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
-def changed_line_ranges(
+@dataclass(frozen=True)
+class Hunk:
+    old_start: int
+    old_n: int
+    new_start: int
+    new_n: int
+
+
+def parse_hunks(
     root: str,
     base: str,
     head: Optional[str] = None,
     include_uncommitted: bool = False,
 ) -> dict:
-    """Map each changed file (repo-root-relative path) -> list of (start, end)
-    line ranges that differ between `base` and `head` (default HEAD), on the
-    new-file side. `--unified=0` so ranges are tight.
+    """Map each changed file (repo-root-relative path) -> list of `Hunk`s
+    (old_start, old_n, new_start, new_n), in file order, between `base` and
+    `head` (default HEAD). `--unified=0` so hunks are tight -- one per
+    contiguous change, no context padding. The shared parse behind both
+    `changed_line_ranges` (drift intersection) and `map_line` (anchor
+    shifting), so both operate on the identical set of hunks.
 
-    include_uncommitted=True diffs `base` against the working tree instead of a
-    committed ref, catching edits that are not committed yet (useful during
-    active development; the default sticks to committed history for determinism).
-    A pure deletion hunk (new-len 0) is recorded as a zero-width range at the
-    line it was removed from, so a component anchored there still registers."""
+    include_uncommitted=True diffs `base` against the working tree instead of
+    a committed ref, catching edits that are not committed yet (useful during
+    active development; the default sticks to committed history for
+    determinism)."""
     spec = [base] if include_uncommitted else [f"{base}..{head or 'HEAD'}"]
     diff = _git(root, "diff", "--unified=0", "--no-color", *spec)
 
-    ranges: dict[str, list[tuple[int, int]]] = {}
+    hunks: dict[str, list[Hunk]] = {}
     current: Optional[str] = None
     for line in diff.splitlines():
         if line.startswith("+++ "):
@@ -93,11 +126,84 @@ def changed_line_ranges(
             m = _HUNK_RE.match(line)
             if not m:
                 continue
-            start = int(m.group(1))
-            length = int(m.group(2)) if m.group(2) is not None else 1
-            end = start + length - 1 if length > 0 else start
-            ranges.setdefault(current, []).append((start, end))
+            old_start = int(m.group(1))
+            old_n = int(m.group(2)) if m.group(2) is not None else 1
+            new_start = int(m.group(3))
+            new_n = int(m.group(4)) if m.group(4) is not None else 1
+            hunks.setdefault(current, []).append(Hunk(old_start, old_n, new_start, new_n))
+    return hunks
+
+
+def _ranges_from_hunks(hunks_by_path: dict, side: str) -> dict:
+    """Collapse a path -> [Hunk] map into path -> [(start, end)] ranges on the
+    requested side ("old" or "new"). A hunk with zero length on that side (a
+    pure insertion on the old side, a pure deletion on the new side) becomes a
+    zero-width range at its start line, so a component anchored exactly there
+    still registers as touched."""
+    ranges: dict[str, list[tuple[int, int]]] = {}
+    for path, hunks in hunks_by_path.items():
+        rs = []
+        for h in hunks:
+            s, n = (h.old_start, h.old_n) if side == "old" else (h.new_start, h.new_n)
+            rs.append((s, s + n - 1) if n > 0 else (s, s))
+        if rs:
+            ranges[path] = rs
     return ranges
+
+
+def changed_line_ranges(
+    root: str,
+    base: str,
+    head: Optional[str] = None,
+    include_uncommitted: bool = False,
+    side: str = "new",
+) -> dict:
+    """Map each changed file (repo-root-relative path) -> list of (start, end)
+    line ranges that differ between `base` and `head` (default HEAD).
+
+    `side` selects which file's coordinates the ranges are expressed in:
+    "new" (default, HEAD-side -- e.g. for diffing against current-coordinate
+    anchors) or "old" (base-side -- required when intersecting against
+    baseline-coordinate anchors, which is what reconcile's drift check does).
+    See `parse_hunks` for the include_uncommitted contract."""
+    hunks_by_path = parse_hunks(root, base, head, include_uncommitted)
+    return _ranges_from_hunks(hunks_by_path, side)
+
+
+def map_line(line: Optional[int], hunks: list, is_end: bool = False) -> Optional[int]:
+    """Shift a baseline (old-file) line number to HEAD (new-file) coordinates
+    given `hunks` (a path's `Hunk` list from `parse_hunks`, any order -- sorted
+    here by old_start).
+
+    - A line inside a replaced/deleted hunk's old range snaps to that hunk's
+      new bounds (new_start for the start of a range, new_start+new_n-1 for
+      the end) instead of sliding by a uniform offset, so a range whose
+      boundary lands mid-edit still expands to cover the edit. A hunk that
+      deletes its old lines outright (new_n == 0) collapses the line to the
+      insertion point (new_start) -- there is nothing left to point at.
+    - A pure-insertion hunk (old_n == 0) only pushes lines strictly AFTER
+      old_start; old_start itself (the anchor line the insertion sits after)
+      is untouched.
+    - Lines below all of a hunk's old range accumulate its (new_n - old_n)
+      offset.
+
+    None passes through unchanged (whole-file/unanchored locations)."""
+    if line is None:
+        return None
+    offset = 0
+    for h in sorted(hunks, key=lambda h: h.old_start):
+        old_end = h.old_start + h.old_n - 1
+        if h.old_n > 0 and h.old_start <= line <= old_end:
+            if h.new_n > 0:
+                return h.new_start + h.new_n - 1 if is_end else h.new_start
+            return h.new_start
+        if h.old_n == 0:
+            if line > h.old_start:
+                offset += h.new_n
+            continue
+        if line > old_end:
+            offset += h.new_n - h.old_n
+    return line + offset
 
 
 def drift_diff(
@@ -162,6 +268,12 @@ class DriftCandidate:
 def diff_mapper(graph: Graph, changed: dict, path_prefix: str = "") -> list:
     """Components whose anchored line ranges overlap the changed hunks.
 
+    `changed` must be expressed in the SAME coordinate system as the stored
+    anchors -- that's the OLD (baseline) side of the diff, since anchors are
+    recorded in the coordinates of the commit they were last verified at.
+    Pass `changed_line_ranges(..., side="old")` here, not the default "new"
+    side (which is what HEAD-coordinate readers like a live editor want).
+
     `path_prefix` is prepended to each component location path before matching,
     so project-root-relative anchors line up with git's repo-root-relative diff
     paths when the graph lives in a subdirectory of the repo."""
@@ -192,6 +304,7 @@ class ReconcileReport:
     drifted: list = field(default_factory=list)       # [(cid, [paths])] newly/again drifted
     recovered: list = field(default_factory=list)     # cids whose code reverted to baseline
     no_baseline: list = field(default_factory=list)   # implemented but never given a sha
+    shifted: list = field(default_factory=list)        # anchors moved to HEAD coordinates
     checked: int = 0
 
     @property
@@ -209,6 +322,11 @@ def _status(comp) -> str:
     return "implemented"
 
 
+def _full_path(prefix: str, path: str) -> str:
+    full = f"{prefix}{path}" if prefix else path
+    return full.replace("\\", "/")
+
+
 def reconcile(
     graph: Graph,
     project_root: str,
@@ -220,9 +338,23 @@ def reconcile(
 
     Baseline per component: its own `implemented_sha`, else `since`, else the
     graph's `last_synced_sha`. Components with no baseline are reported (re-mark
-    them to establish one) rather than guessed at. Advances `last_synced_sha` to
-    HEAD. Pure aside from read-only git calls + in-memory flag updates; the
-    caller persists the graph.
+    them to establish one) rather than guessed at.
+
+    Drift is judged on the OLD (baseline) side of the diff, matching the
+    coordinate system stored anchors are in -- see the module docstring. A
+    component that is NOT drifted has still likely moved (anything inserted or
+    deleted above it), so its anchors are shifted to HEAD coordinates and its
+    baseline (implemented_sha) is advanced to HEAD: lossless, since the
+    content is unchanged and only its position moved. A DRIFTED component's
+    anchors are best-effort shifted too (snap semantics -- see `map_line`) so
+    downstream readers (drift_diff, get_component_code) still land near the
+    right region, but its flag and baseline are left alone; only
+    mark_implemented clears those. Whole-file anchors (no start_line) are
+    never shifted, matching their existing any-change-is-drift behavior.
+
+    Advances `last_synced_sha` to HEAD regardless. Pure aside from read-only
+    git calls + in-memory mutations (flags, anchor coordinates, baselines);
+    the caller persists the graph.
     """
     head = current_head(project_root)
     root = repo_root(project_root)
@@ -255,20 +387,45 @@ def reconcile(
                     report.recovered.append(cid)
             continue
         try:
-            changed = changed_line_ranges(root, base, head, include_uncommitted)
+            hunks_by_path = parse_hunks(root, base, head, include_uncommitted)
         except GitError:
             # an unresolvable baseline (e.g. rebased-away commit) -> can't judge
             report.no_baseline.extend(cids)
             continue
-        hit = {c.component_id: c.paths for c in diff_mapper(graph, changed, prefix)}
+        changed_old = _ranges_from_hunks(hunks_by_path, "old")
+        hit = {c.component_id: c.paths for c in diff_mapper(graph, changed_old, prefix)}
         for cid in cids:
             comp = graph.components[cid]
-            if cid in hit:
+            drifted_now = cid in hit
+
+            # Shift anchors toward HEAD coordinates regardless of drift status
+            # -- clean anchors move losslessly, drifted ones snap best-effort.
+            for loc in comp.locations:
+                if loc.start_line is None or loc.end_line is None:
+                    continue  # whole-file anchor: nothing to shift
+                hunks = hunks_by_path.get(_full_path(prefix, loc.path))
+                if not hunks:
+                    continue  # this file didn't change under this base
+                new_start = map_line(loc.start_line, hunks, is_end=False)
+                new_end = map_line(loc.end_line, hunks, is_end=True)
+                if (new_start, new_end) != (loc.start_line, loc.end_line):
+                    report.shifted.append({
+                        "component_id": cid,
+                        "path": loc.path,
+                        "old": [loc.start_line, loc.end_line],
+                        "new": [new_start, new_end],
+                    })
+                    loc.start_line, loc.end_line = new_start, new_end
+
+            if drifted_now:
                 comp.code_drifted = True
                 report.drifted.append((cid, hit[cid]))
-            elif comp.code_drifted:
-                comp.code_drifted = False
-                report.recovered.append(cid)
+            else:
+                if comp.code_drifted:
+                    comp.code_drifted = False
+                    report.recovered.append(cid)
+                # lossless rebaseline: content is unchanged, only position moved
+                comp.implemented_sha = head
 
     graph.last_synced_sha = head
     return report
